@@ -1,6 +1,6 @@
 ---
 name: local-voice
-description: Generate speech locally in English (Breeze TTS 2 voice design: describe the voice and mood in words) or Romanian (OmniVoice, correct diacritics) on this machine's GPU, then turn it into a machine with vocoder-based sound-design presets (Mass Effect Reaper / Harbinger style), check every take with Whisper and a spectrogram, and deliver the keepers to a folder the user names. Use when the user asks for local TTS, local voice generation, a Reaper or other non-human / monster / machine voice, or wants speech made without a cloud service.
+description: Generate speech locally in English (Breeze TTS 2 voice design: describe the voice and mood in words) or Romanian (OmniVoice, correct diacritics) on this machine's GPU, then turn it into a machine with vocoder-based sound-design presets (Mass Effect Reaper / Harbinger style), check every take with Whisper and a spectrogram, and deliver the keepers to a folder the user names, or play them on the user's speakers. Use when the user asks for local TTS, local voice generation, a Reaper or other non-human / monster / machine voice, or wants speech made without a cloud service.
 ---
 
 # local-voice: voice-design TTS + non-human effects on the local GPU
@@ -14,6 +14,23 @@ articulation over a synthetic brass tone at a fixed low pitch, then distortion, 
 and EQ. The presets add no reverb or echo: clean, close voices, with the room added later. The
 delivery (pace, pauses, emphasis) still comes from the model.
 
+## Quick start
+
+The tool is installed at `~/.claude/skills/local-voice` (this skill's folder). Use the commands as
+written: `~` works in Bash, and `cygpath -w` gives `cmd` the Windows form of the same path.
+
+```bash
+curl -s http://127.0.0.1:8190/api/health                     # JSON = the server is up
+cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window                      # if not: opens its own window, ~1 min warmup
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --wait 180 --out <dir>   # make a take with the user's defaults
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --play --no-check        # or say it out loud right now
+```
+
+Just the text gets the user's defaults (`--settings` shows them). Deliver files with
+SendUserFile if you have it, so the user can listen; otherwise give them the full path. **To talk to the user out loud** (rather than make audio
+files), use the `speak` skill: it covers when to speak and how to write for the ear. The rest of
+this file is the reference.
+
 **You cannot hear the audio.** You judge takes from Whisper transcripts (did the words survive the
 effects?), spectrograms (is the energy where the preset intends?) and the numbers. The user is the
 only judge of how it *sounds*: send them the files early and let them steer.
@@ -23,14 +40,15 @@ only judge of how it *sounds*: send them the files early and let them steer.
 "Make the Reaper say: *Your extinction is not a tragedy. It is a correction.*"
 
 1. **Check** the GPU and the server (step 1). Start the server if needed.
-2. **Draft:** start with the defaults (just the text); for alternatives, add
-   `--seed random` for 2-3 takes (step 2).
+2. **Draft:** one take with the defaults (just the text). If it scores well and the user didn't ask
+   for options, one take is enough. For alternatives, add `--seed random` for 2-3 more (step 2).
 3. **Read** the transcripts: wet below ~85% of words means the effects are burying the speech.
    Open the spectrogram PNG with Read if something looks odd.
 4. **Iterate:** another seed (the base voice varies a lot between seeds), a different
    `--instruction`, another preset, or `--fx` to re-run effects on a take without regenerating.
-5. **Deliver** the best with `--out` to where the user wants it, and send them the files
-   (SendUserFile) so they can listen.
+5. **Deliver** the keeper without regenerating it: `say.py --fx <take id> --no-check --out <dir>`
+   (add `--format mp3` for WhatsApp and other messengers: just the MP3). `--out` creates the folder.
+   Then send the files (SendUserFile if you have it; otherwise give the paths).
 6. **Report:** paths, take ids and seeds, the instruction used, the words-heard scores, and that the
    server is still holding VRAM (step 5).
 
@@ -41,7 +59,6 @@ only judge of how it *sounds*: send them the files early and let them steer.
   "a steadier pitch", "deeper") rather than asking open-endedly.
 - Before writing audio into their project, if they didn't say where it goes.
 
-All paths below are relative to this skill's base directory (the folder containing this file).
 `README.md` has the full details.
 
 ## Ground rules
@@ -70,13 +87,16 @@ tasklist | grep -i -E "llama-server|python"
 server (~15.5 GB) can't run alongside it. If one is up, **ask the user** before stopping it with
 that skill's own `stop.cmd`.
 
-**Start the server** in the background (run_in_background), without opening a browser:
+**Start the server in its own window:**
 
 ```bash
-cmd //c "<base dir>\\start.cmd" --no-browser
+cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window
 ```
 
-It loads the model in ~10 s, then **warms up its fast paths for ~35-50 s** before it answers. The
+This returns at once and opens a visible console window titled "local-voice server - close this
+window to stop it", so the user can see the server is running and stop it by closing the window.
+Always start it this way (not hidden in the background), and tell the user the window is theirs to
+close. It loads the model in ~10 s, then **warms up its fast paths for ~35-50 s** before it answers. The
 `--wait` flag below covers that, so you can start it and generate right away with `--wait 180`.
 
 If the fast-path warmup fails (a Triton or driver problem), run the server directly with `--safe`:
@@ -91,19 +111,19 @@ ask the user before running it.
 Run the CLI with any Python 3 (standard library only):
 
 ```bash
-python "<base dir>/scripts/say.py" "<text>" --check --wait 180 --out <dir>
-python "<base dir>/scripts/say.py" "<text>" --preset harbinger --seed 7 --check --out <dir>
-python "<base dir>/scripts/say.py" "<text>" --instruction "<voice description>" --check --out <dir>
-python "<base dir>/scripts/say.py" "<text>" --like <take id> --check --out <dir>
-python "<base dir>/scripts/say.py" --fx <take id> --preset harbinger --pitch -4 --reverb hall --out <dir>
-python "<base dir>/scripts/say.py" "<romanian text>" --lang ro --check --out <dir>
-python "<base dir>/scripts/say.py" "<romanian text>" --lang ro --like <take id> --tempo 0.85 --check --out <dir>
-python "<base dir>/scripts/say.py" "<text>" --format mp3 --out <dir>     # for WhatsApp / messengers
-python "<base dir>/scripts/say.py" --presets
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --check --wait 180 --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --preset harbinger --seed 7 --check --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --instruction "<voice description>" --check --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --like <take id> --check --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py --fx <take id> --preset harbinger --pitch -4 --reverb hall --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<romanian text>" --lang ro --check --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<romanian text>" --lang ro --like <take id> --tempo 0.85 --check --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --format mp3 --out <dir>     # for WhatsApp / messengers
+python ~/.claude/skills/local-voice/scripts/say.py --presets
 ```
 
 **Defaults.** With nothing but the text, you get the default voice: the `reaper-drone` preset at
-strength 6, seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
+strength 6 (`--cfg 6`), seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
 tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
 per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
 take, `--no-check` (API: `"check": false`) to skip the check.
@@ -124,12 +144,14 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--like TAKE` | Keep an earlier take's voice for a new line: use it for multi-line scenes so every line sounds like the same Reaper. Works across languages: Romanian lines can clone an English take's voice (and the reverse). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
 | `--check` / `--no-check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. **On by default**; `--no-check` saves ~1 s when you don't need it. |
-| `--out DIR` / `--name STEM` | Copy the processed audio and the dry WAV to DIR (never overwrites). |
-| `--format F` | With `--out`: `both` (default), `wav` or `mp3`. **WhatsApp and most messengers reject WAV**: give the user MP3 for those. Every take gets an MP3 automatically. |
+| `--out DIR` / `--name STEM` | Copy the take to DIR (created if needed; never overwrites). Works with `--fx` to export an existing take. |
+| `--format F` | With `--out`: `both` (default: processed WAV + MP3 + the dry WAV), `wav` (processed + dry WAVs) or `mp3` (just the processed MP3). **WhatsApp and most messengers reject WAV**: use `mp3` for those. |
 | `--wait S` | Wait up to S seconds for the server. |
 | `--json` | Only the server's JSON (plus `paths`): parse this rather than the text output. |
+| `--play` | Play the processed take on the user's speakers when it's ready; returns when playback ends. Exit 1 if it couldn't play. |
+| `--no-save` | Delete the whole take from `output/` when done (after `--play` and/or `--out`): for speech that's only meant to be heard. |
 
-**Presets:**
+**Presets.** "The Reaper voice" means the default, `reaper-drone`; offer the others as variations.
 
 | Preset | Use it for |
 |---|---|
@@ -214,7 +236,7 @@ local-agent and local-image servers. **Leave it running and tell the user** it's
 they're done or want one of those:
 
 ```bash
-cmd //c "<base dir>\\stop.cmd"
+cmd //c "$(cygpath -w ~/.claude/skills/local-voice/stop.cmd)"
 ```
 
 It stops the server recorded in `output/.server.pid` (and its Romanian worker), whichever path

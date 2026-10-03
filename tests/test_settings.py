@@ -118,3 +118,35 @@ def test_old_pointer_in_output_is_migrated(app):
     (app.OUTPUT / "house_voice.json").write_text(json.dumps({"id": tid, "f0_hz": 65.0}), encoding="utf-8")
     assert app.default_voice_info()["id"] == tid
     assert not (app.OUTPUT / "house_voice.json").exists() and (app.VOICES / "default.wav").is_file()
+
+
+# ------------------------------------------------------------------ takes
+
+def test_trim_edges_drops_a_leading_blip(app):
+    sr = 24000
+    blip = np.r_[np.zeros(int(0.1 * sr)), 0.3 * np.random.default_rng(0).standard_normal(int(0.05 * sr)),
+                 np.zeros(int(0.4 * sr))]
+    t = np.arange(int(1.0 * sr)) / sr
+    speech = 0.3 * np.sin(2 * np.pi * 120 * t)
+    clip = np.r_[blip, speech, np.zeros(int(0.3 * sr))].astype(np.float32)
+    out = app.trim_edges(clip, sr)
+    assert len(out) < len(clip) - int(0.5 * sr)          # the blip, its silence and the tail are gone
+    assert np.max(np.abs(out[: int(0.02 * sr)])) < 0.01   # it starts at the speech, not the blip
+    assert len(out) >= int(1.0 * sr)                      # all the speech is still there
+
+
+def test_deleting_a_take_removes_only_its_files(app):
+    a = make_take(app, "20260101-120000-aaaa")
+    b = make_take(app, "20260101-120000-bbbb")
+    (app.OUTPUT / f"{a}_fx-reaper-drone.mp3").write_bytes(b"x")
+    app.set_default_voice(a)
+    assert app.delete_take(a)["deleted"] == 3
+    assert not list(app.OUTPUT.glob(f"{a}*")) and app.take_paths(b)["dry"].is_file()
+    assert app.default_voice_info()["id"] == a            # the default voice is a copy in voices/
+
+
+def test_deleting_needs_a_valid_take_id(app):
+    from fastapi import HTTPException
+    for bad in ("../x", "*", "20260101-120000-zzzz"):
+        with pytest.raises(HTTPException):
+            app.delete_take(bad)

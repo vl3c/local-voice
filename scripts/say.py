@@ -28,6 +28,7 @@ import argparse
 import http.client
 import json
 import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -41,9 +42,10 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 OUTPUT = Path(__file__).resolve().parent.parent / "output"
 
 
-def call(path: str, payload: dict | None = None, timeout: float = 900):
+def call(path: str, payload: dict | None = None, timeout: float = 900, method: str | None = None):
     data = None if payload is None else json.dumps(payload).encode()
-    req = urllib.request.Request(SERVER + path, data=data, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(SERVER + path, data=data, headers={"Content-Type": "application/json"},
+                                 method=method)
     try:
         with _OPENER.open(req, timeout=timeout) as r:
             return json.load(r)
@@ -71,6 +73,21 @@ def wait_for_server(seconds: float) -> bool:
             time.sleep(2)
 
 
+def play(path: Path) -> None:
+    """Play a WAV on this machine's default output device, blocking until it ends."""
+    if sys.platform == "win32":
+        import winsound
+        winsound.PlaySound(str(path), winsound.SND_FILENAME)
+        return
+    players = [["afplay"]] if sys.platform == "darwin" else [
+        ["paplay"], ["aplay", "-q"], ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]]
+    for cmd in players:
+        if shutil.which(cmd[0]):
+            subprocess.run([*cmd, str(path)], check=True)
+            return
+    raise RuntimeError("no audio player found (tried " + ", ".join(c[0] for c in players) + ")")
+
+
 def deliver(res: dict, out: Path | None, name: str | None, formats: str = "both") -> list[Path]:
     """Copy the processed audio (WAV and/or MP3) and the dry WAV to `out`, never overwriting."""
     paths = []
@@ -82,8 +99,8 @@ def deliver(res: dict, out: Path | None, name: str | None, formats: str = "both"
         if kind == "spectrogram":
             paths.append(src)  # review material, not a deliverable
             continue
-        if (kind == "wet" and formats == "mp3") or (kind == "mp3" and formats == "wav"):
-            continue
+        if (kind in ("wet", "dry") and formats == "mp3") or (kind == "mp3" and formats == "wav"):
+            continue  # mp3: just the MP3 (for messengers); wav: the processed and dry WAVs
         out.mkdir(parents=True, exist_ok=True)
         stem = (name + ("_dry" if kind == "dry" else "")) if name else Path(fname).stem
         dest = out / f"{stem}{src.suffix}"
@@ -138,9 +155,15 @@ def main() -> int:
     ap.add_argument("--out", type=Path, help="copy results here (never overwrites)")
     ap.add_argument("--name", help="file name stem for --out")
     ap.add_argument("--format", choices=["both", "wav", "mp3"], default="both",
-                    help="processed audio to copy with --out: WAV, MP3 (for WhatsApp etc.) or both (default)")
+                    help="what --out copies: both (default: processed WAV + MP3 + dry WAV), wav (processed + dry "
+                    "WAV) or mp3 (just the MP3, e.g. for WhatsApp). --out creates the folder if needed")
     ap.add_argument("--wait", type=float, default=5, help="seconds to wait for the server to come up")
     ap.add_argument("--json", action="store_true", help="print the raw server response")
+    ap.add_argument("--no-save", action="store_true",
+                    help="delete the take's files from output/ when done (after --play and/or --out): for speech "
+                    "that's only meant to be heard")
+    ap.add_argument("--play", action="store_true",
+                    help="play the processed audio on this machine's speakers when it's ready (blocks until done)")
     args = ap.parse_args()
 
     if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
@@ -161,7 +184,8 @@ def main() -> int:
         print(f"in effect: {src}")
         for k, v in st["effective"].items():
             mark = "  (saved)" if k in st["saved"] else ""
-            shown = "random" if (k == "seed" and v is None) else ("the preset's" if (k == "instruction" and not v) else v)
+            shown = ("random" if (k == "seed" and v is None) else
+                     "the preset's (English; Romanian clones the default voice)" if (k == "instruction" and not v) else v)
             print(f"  {k:12s} {shown}{mark}")
         return 0
     if args.default_voice is not None:
@@ -193,7 +217,6 @@ def main() -> int:
     paths = deliver(res, args.out, args.name, args.format)
     if args.json:  # machine-readable: JSON only, with the delivered paths inside
         print(json.dumps({**res, "paths": [str(p) for p in paths]}, indent=2, ensure_ascii=False))
-        return 0
     else:
         if "id" in res:
             shape = "".join(f"  {k} {res[k]:+g}" if k == "pitch" else f"  {k} {res[k]:g}"
@@ -205,8 +228,9 @@ def main() -> int:
                 print(f"voice: {res['instruction']}")
             elif res.get("like"):
                 print(f"voice: {'default voice, ' if res.get('default_voice') else ''}cloned from take {res['like']}")
-        timing = [f"{k} {res[k]}s" for k in ("duration_s", "gen_s", "fx_s") if k in res]
-        print("  ".join(timing))
+        keys = ("duration_s", "fx_s") if args.fx else ("duration_s", "gen_s", "fx_s")
+        timing = [f"{k} {res[k]}s" for k in keys if k in res]
+        print("  ".join(timing) + ("  (effects only, no regeneration)" if args.fx else ""))
         if "heard" in res:
             for k in ("dry", "wet"):
                 flag = "  [Whisper looped: unreliable, listen]" if k in res.get("asr_unreliable", []) else ""
@@ -215,8 +239,25 @@ def main() -> int:
             print(f"check failed (the take itself is fine): {res['check_error']}")
         for w in res.get("warnings", []):
             print(f"WARNING: {w}")
-    for p in paths:
-        print(p)
+        for p in paths:
+            print(p)
+    if args.play:
+        wet = res.get("files", {}).get("wet")
+        if not wet:
+            print("nothing to play", file=sys.stderr)
+            return 1
+        try:
+            sys.stdout.flush()
+            play(OUTPUT / wet)
+        except Exception as exc:  # the take exists; only the playback failed
+            print(f"could not play {wet}: {exc}", file=sys.stderr)
+            return 1
+        if not args.json:
+            print(f"played {wet}")
+    if args.no_save and res.get("id"):
+        gone = call(f"/api/takes/{res['id']}", method="DELETE")
+        if not args.json:
+            print(f"not saved: removed {gone['deleted']} file(s) of take {res['id']}")
     return 0
 
 

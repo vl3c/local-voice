@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import logging
+import tempfile
 import difflib
 import json
 import os
@@ -86,6 +88,36 @@ FAST_STAGES = ("text_encoder", "backbone_prefill", "backbone_decode", "depth_dec
 
 # --------------------------------------------------------------------------- models
 
+# Known-harmless startup chatter from the engine's libraries: SoX (an audio tool a
+# Breeze dependency looks for at import but never uses here) and flash-attn (an
+# optional speed-up that doesn't build on RTX 50-series; SDPA attention is used).
+_NOISE = re.compile(r"sox|flash-attn|^\*+$|if you do (not )?have|path variables|is not recognized as an internal|"
+                    r"operable program or batch file", re.I)
+
+
+def _quiet_engine_imports() -> None:
+    """Import the noisy engine modules with stdout/stderr captured at the OS level (part of
+    the SoX message comes from a child process), replaying anything that isn't known noise."""
+    sys.stdout.flush(); sys.stderr.flush()
+    saved = os.dup(1), os.dup(2)
+    with tempfile.TemporaryFile(mode="w+b") as cap:
+        os.dup2(cap.fileno(), 1); os.dup2(cap.fileno(), 2)
+        try:
+            import qwen_tts  # noqa: F401  (pulls in the SoX check and the flash-attn notice)
+        finally:
+            sys.stdout.flush(); sys.stderr.flush()
+            os.dup2(saved[0], 1); os.dup2(saved[1], 2)
+            os.close(saved[0]); os.close(saved[1])
+        cap.seek(0)
+        for line in cap.read().decode("utf-8", "replace").splitlines():
+            if line.strip() and not _NOISE.search(line) and not line.strip(" -").startswith("http://sox"):
+                print(line, flush=True)
+
+
+# PyTorch's compiler logs internal shape-guard notes while it warms up the fast paths.
+logging.getLogger("torch.fx.experimental.symbolic_shapes").setLevel(logging.ERROR)
+
+
 class _Breeze:
     def __init__(self, attn: str, fast: list[str]):
         import torch
@@ -96,6 +128,7 @@ class _Breeze:
 
         self.torch = torch
         t0 = time.time()
+        _quiet_engine_imports()
         self.tokenizer, self.model, self.audio_tokenizer = load_runtime(
             MODELS / "breeze-tts-2", device=resolve_device(), attn_implementation=attn)
         update_generation_config_for_breeze(self.model)
@@ -255,6 +288,32 @@ OMNI_TRIES = 3
 OMNI_GOOD_MATCH = 0.95
 
 
+def trim_edges(audio: np.ndarray, sr: int, min_run_s: float = 0.15, pad_s: float = 0.03) -> np.ndarray:
+    """Cut silence, and isolated short blips, off both ends of a clip.
+
+    OmniVoice sometimes emits a ~0.1 s burst of noise before the speech starts; the
+    compressor and loudness pass then turn it into an audible click. Speech is the
+    first and last *sustained* run of sound (at least `min_run_s`, within 40 dB of the
+    clip's peak); anything outside those runs goes.
+    """
+    hop = max(1, int(0.01 * sr))
+    n = len(audio) // hop
+    if n < 3:
+        return audio
+    frames = audio[: n * hop].reshape(n, hop)
+    level = 10 * np.log10(np.mean(frames.astype(np.float64) ** 2, axis=1) + 1e-12)
+    active = level > level.max() - 40
+    run = max(1, int(min_run_s / 0.01))
+    # windows where every frame is active = sustained sound
+    ok = np.convolve(active.astype(int), np.ones(run, dtype=int), mode="valid") == run
+    if not ok.any():
+        return audio
+    first = int(np.argmax(ok))
+    last = int(len(ok) - 1 - np.argmax(ok[::-1])) + run
+    pad = int(pad_s * sr)
+    return audio[max(0, first * hop - pad): min(len(audio), last * hop + pad)]
+
+
 def split_sentences(text: str, min_words: int = 4) -> list[str]:
     """Sentences, with very short ones merged into a neighbour (they clone badly alone)."""
     parts = [p.strip() for p in SENTENCE.split(text.strip()) if p.strip()]
@@ -287,7 +346,7 @@ def omni_take(text: str, language: str, instruct: str | None, seed: int, speed: 
                 if match >= OMNI_GOOD_MATCH:
                     break
             report.append({"text": sentence, "match": best[0], "tries": k + 1, "seed": best[3]})
-            pieces += [best[1], np.zeros(int(SENTENCE_PAUSE_S * sr), dtype=np.float32)]
+            pieces += [trim_edges(best[1], sr), np.zeros(int(SENTENCE_PAUSE_S * sr), dtype=np.float32)]
             spoken.append(best[2])
     finally:
         tmp.unlink(missing_ok=True)
@@ -870,6 +929,18 @@ def refx(req: FxReq):
         return {**meta, **render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])}
 
 
+@app.delete("/api/takes/{tid}")
+def delete_take(tid: str):
+    """Remove every file of one take (speech that was only meant to be heard, not kept).
+    The default voice lives in voices/, so deleting the take it came from is harmless."""
+    load_take(tid)  # validates the id: nothing outside output/ can be named
+    with _lock:
+        files = [p for p in OUTPUT.glob(f"{tid}*") if p.is_file() and (p.name == f"{tid}.json" or p.name.startswith(f"{tid}_"))]
+        for p in files:
+            p.unlink(missing_ok=True)
+    return {"id": tid, "deleted": len(files)}
+
+
 @app.get("/files/{name}")
 def files(name: str):
     p = (OUTPUT / name).resolve()
@@ -917,6 +988,7 @@ def main() -> None:
     if not args.lazy:
         tts()
     # Loopback only, always: nothing here is meant to be reachable from the network.
+    print(f"[local-voice] ready on http://127.0.0.1:{args.port}/  (stop: close this window, or stop.cmd)", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 

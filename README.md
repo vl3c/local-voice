@@ -14,9 +14,35 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1   # ~23 GB: weights + two
 .\start.cmd                                              # opens http://127.0.0.1:8190/
 ```
 
-For agents: `SKILL.md` is a Claude Code skill (symlink or junction this folder into
-`~/.claude/skills/local-voice`). Any other agent can use the CLI (`scripts/say.py`, standard
-library only) or the HTTP API below.
+## For AI agents (Claude Code skills)
+
+Two Claude Code skills come with the repo:
+
+| Skill | What it's for |
+|---|---|
+| `local-voice` (`SKILL.md`) | making audio: lines, scenes and voices, judged with Whisper transcripts and spectrograms, delivered as files |
+| `speak` (`skills/speak/SKILL.md`) | **talking to you out loud**: the agent says short replies on your speakers (and in chat) when you ask it to speak, "tell me when it's done", "read this to me" |
+
+Install both as links in your personal skills folder (links, not copies, so they follow the repo):
+
+```powershell
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\local-voice" -Target (Resolve-Path .).Path
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\speak" -Target (Resolve-Path .\skills\speak).Path
+```
+
+The `speak` skill finds the tool at `~/.claude/skills/local-voice`, so install `local-voice` at
+exactly that path. Then, in Claude Code, ask something like "say hello out loud" or "tell me by
+voice when the build finishes". The server must be running (`start.cmd`) or the agent starts it.
+
+Any other agent can use the CLI (`scripts/say.py`, standard library only) or the HTTP API below.
+The essentials:
+
+```powershell
+python scripts\say.py "We are the dark."                      # a take with the defaults
+python scripts\say.py "We are the dark." --play --no-check --no-save   # say it out loud, keep nothing
+python scripts\say.py "Noi suntem întunericul." --lang ro --play
+python scripts\say.py --settings                              # which defaults are in effect
+```
 
 ## How it works
 
@@ -69,8 +95,8 @@ repeating words to fill the time it's given, so the slowest settings are `tempo`
 **The default voice.** OmniVoice's own deepest design ("very low pitch") lands around 100-130 Hz,
 which sounds small under the Reaper presets. Breeze's English Reaper voice sits near 65 Hz. So
 by default Romanian lines **clone the default voice**: an English take. If there isn't one, the
-first Romanian line makes it with Breeze, trying seeds until the voice lands under 75 Hz (seed
-12 gives ~65 Hz), and stores a copy in `voices\` (safe from clearing `output\`). Cloned Romanian keeps that depth
+first Romanian line makes it with Breeze, trying its own seeds until the voice lands under 75 Hz
+(seed 12 gives ~65 Hz; unrelated to the default seed for takes), and stores a copy in `voices\` (safe from clearing `output\`). Cloned Romanian keeps that depth
 (66-69 Hz measured) and Whisper still transcribes it perfectly. Set your own with **Set as
 default voice** on any take, or `say.py --default-voice <take>`. Whisper can't judge accent, so
 listen for English colouring in cloned Romanian.
@@ -135,7 +161,10 @@ Verify the weights at any time without downloading anything:
 ## Using it
 
 **`.\start.cmd`** loads the model (~10 s), warms up the CUDA-graph fast paths (~35-50 s), then
-opens the page. `start.cmd --no-browser` starts the server only, for agents. A second start
+opens the page. `start.cmd --window` starts the server only, in its own console window titled
+"local-voice server - close this window to stop it", and returns at once: that's how agents start
+it, so a server is never running out of sight, and closing the window stops it (and frees the GPU).
+`start.cmd --no-browser` runs it in the current console, for scripts that manage it. A second start
 while one is running exits at once ("port in use") instead of loading another copy. Close the
 console window, or run `.\stop.cmd`, to free the VRAM: it stops the server recorded in
 `output\.server.pid` and its Romanian worker, however it was started.
@@ -143,7 +172,7 @@ console window, or run `.\stop.cmd`, to free the VRAM: it stops the server recor
 ### Command line (what agents use)
 
 **Defaults.** With nothing but the text, you get the default voice: the `reaper-drone` preset at
-strength 6, seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
+strength 6 (`--cfg 6`), seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
 tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
 per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
 take, `--no-check` (API: `"check": false`) to skip the check.
@@ -178,9 +207,11 @@ python scripts\say.py --presets
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take; no new generation. |
 | `--check` / `--no-check` | Whisper transcribes dry and processed audio, prints a words-heard score, and draws a spectrogram. On by default. |
 | `--out DIR` / `--name STEM` | Copy the processed audio and the dry WAV to DIR (never overwrites). |
-| `--format F` | With `--out`: `both` (default), `wav` or `mp3` for the processed audio. WhatsApp and most messengers take MP3, not WAV. |
+| `--format F` | With `--out`: `both` (default: processed WAV + MP3 + dry WAV), `wav` (processed + dry WAVs) or `mp3` (just the MP3: WhatsApp and most messengers take MP3, not WAV). |
 | `--wait S` | Wait up to S seconds for the server (startup takes ~60 s). |
 | `--json` | Print only the server's JSON response, plus `paths` (the delivered files). |
+| `--play` | Play the processed take on this machine's speakers; returns when playback ends (exit 1 if it couldn't play). |
+| `--no-save` | Delete the whole take from `output\` when done (after `--play` and/or `--out`): speech meant only to be heard. The `speak` skill uses it. |
 
 Exit codes: 0 done, 1 no server / lost the server / server error, 2 bad arguments.
 
@@ -205,6 +236,7 @@ in `config.local.json`; neither lives in `output\`. All three are gitignored.
 | `GET` / `POST /api/default-voice` | `{"id"}` to set | the default voice: source take id, text, median pitch, `previous` |
 | `POST /api/default-voice/restore-previous` | | swap back to the previous default voice |
 | `GET` / `POST` / `DELETE /api/settings` | the settings to save | `effective`, `saved`, `repo` defaults; save / reset `config.local.json` |
+| `DELETE /api/takes/<id>` | | delete every file of one take (what `--no-save` does) |
 | `GET /files/<name>` | | a WAV, MP3 or PNG from `output/` |
 
 `instruction` omitted means: English, the preset's suggested description; Romanian, clone the
@@ -298,6 +330,6 @@ scripts/say.py                       CLI (standard library only)
 scripts/download_models.py           resumable, verifying downloader
 scripts/check_repo_safe.py           pre-publish scan: no weights, audio, local paths or secrets
 tests/                               effects and text tests (pytest)
-SKILL.md                             instructions for Claude Code
+SKILL.md, skills/speak/SKILL.md      Claude Code skills: make audio / talk out loud
 engine/, models/, .venv*/, output/  created at install / run time, gitignored
 ```
