@@ -1,0 +1,103 @@
+{
+  "description": "The Reaper as a speaking drone: like 'reaper' but the machine's pitch never moves (follow 0), so every word is the same colossal brass drone, shaped only by the words.",
+  "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 70
+    },
+    {
+      "op": "compress",
+      "threshold_db": -30,
+      "ratio": 4,
+      "attack_ms": 4,
+      "release_ms": 120,
+      "makeup_db": 6
+    },
+    {
+      "op": "stretch",
+      "rate": 0.92
+    }
+  ],
+  "buses": [
+    {
+      "name": "brass",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "vocoder",
+          "f0": 43.65,
+          "chord": [
+            1,
+            2
+          ],
+          "follow": 0.0,
+          "steps": 0,
+          "metal": 0.35,
+          "sub": 0.3,
+          "bands": 36,
+          "noise": 0.06,
+          "fricatives": 1.0
+        }
+      ]
+    },
+    {
+      "name": "articulation",
+      "gain_db": -14,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -4
+        },
+        {
+          "op": "highpass",
+          "hz": 2000
+        }
+      ],
+      "off": true
+    }
+  ],
+  "post": [
+    {
+      "op": "drive",
+      "drive_db": 16,
+      "mix": 0.3
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "lowshelf",
+          "hz": 90,
+          "gain_db": 6
+        },
+        {
+          "type": "peak",
+          "hz": 350,
+          "gain_db": -4,
+          "q": 0.6
+        },
+        {
+          "type": "peak",
+          "hz": 2500,
+          "gain_db": 2,
+          "q": 1.0
+        },
+        {
+          "type": "lowpass",
+          "hz": 7500
+        }
+      ]
+    },
+    {
+      "op": "comb",
+      "delay_ms": 3.4,
+      "feedback": 0.5,
+      "mix": 0.15
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

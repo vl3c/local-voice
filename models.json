@@ -1,0 +1,210 @@
+{
+  "_comment": [
+    "Weight manifest. Every file is pinned to a HuggingFace repo revision and a",
+    "SHA256 (LFS metadata for big files, hashed from the bytes for small ones),",
+    "so an upstream re-upload fails loudly instead of silently changing what you",
+    "get. Weights are NOT redistributed by this repo - see LICENSE-MODELS.md."
+  ],
+  "repos": [
+    {
+      "name": "breeze-tts-2",
+      "source": "https://huggingface.co/BreezeBlue/Breeze-TTS-2",
+      "revision": "3e28c5151381a722f1d8661b4118c298caa77aa4",
+      "base_url": "https://huggingface.co/BreezeBlue/Breeze-TTS-2/resolve/3e28c5151381a722f1d8661b4118c298caa77aa4",
+      "dest": "models/breeze-tts-2",
+      "files": [
+        {
+          "path": "LICENSE",
+          "bytes": 18719,
+          "sha256": "f158b88cd51473925e1ce8c39f4c7c9e419304ad71371896c4ff18fa1351dca2"
+        },
+        {
+          "path": "audio_tokenizer/config.json",
+          "bytes": 2336,
+          "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167"
+        },
+        {
+          "path": "audio_tokenizer/configuration.json",
+          "bytes": 76,
+          "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd"
+        },
+        {
+          "path": "audio_tokenizer/model.safetensors",
+          "bytes": 682293092,
+          "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+        },
+        {
+          "path": "audio_tokenizer/preprocessor_config.json",
+          "bytes": 234,
+          "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb"
+        },
+        {
+          "path": "config.json",
+          "bytes": 10161,
+          "sha256": "57849eb756ca1602efe89afcc5c70379dd127f8deeb9f655204d4340190ea929"
+        },
+        {
+          "path": "generation_config.json",
+          "bytes": 251,
+          "sha256": "2ef3f2c0ab8d9ad241059138a795433c5410fd9954efb9625674ecd2a9529434"
+        },
+        {
+          "path": "model-00001-of-00002.safetensors",
+          "bytes": 4961989890,
+          "sha256": "abf813781256e10cbe81f2dbb415f897556225d4dfa0282d67aa8ea164e114a9"
+        },
+        {
+          "path": "model-00002-of-00002.safetensors",
+          "bytes": 2004567152,
+          "sha256": "36aa73b1a11361e1774db90d9c63c63303b294c022de112aa51904d940edcef1"
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "bytes": 109004,
+          "sha256": "19977e3d96bb502ed3165b48adff094f6bd71ec3d349940d1a3ba6a0060bd5e3"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "bytes": 886,
+          "sha256": "194f265bb588d142a16f27d9576104eb3dab3d7ba9961541d2d6e3d5e77e6470"
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 33386945,
+          "sha256": "d3ec9ac3eb2392389b9f5112e85d8b43316494addb587ba7b7a9d61eac23af96"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 1157960,
+          "sha256": "2c084fd6725c2284e8aa6da095a8d036d48fe79665595bfcd50371821b620e44"
+        }
+      ],
+      "note": "Breeze TTS 2: the voice-design TTS model (bf16, ~7.7 GB VRAM in eager mode). Research and Non-Commercial License."
+    },
+    {
+      "name": "whisper-large-v3-turbo",
+      "source": "https://huggingface.co/openai/whisper-large-v3-turbo",
+      "revision": "41f01f3fe87f28c78e2fbf8b568835947dd65ed9",
+      "base_url": "https://huggingface.co/openai/whisper-large-v3-turbo/resolve/41f01f3fe87f28c78e2fbf8b568835947dd65ed9",
+      "dest": "models/whisper-large-v3-turbo",
+      "files": [
+        {
+          "path": "added_tokens.json",
+          "bytes": 34648,
+          "sha256": "3c51f66c4c21f9e126970078f11ae77a78c74aee8df606ee9daba86e467108e0"
+        },
+        {
+          "path": "config.json",
+          "bytes": 1256,
+          "sha256": "c5b526b3e3cd64cd8940dabb45e8ba726629e22d8ed389c29b552f9140daf04a"
+        },
+        {
+          "path": "generation_config.json",
+          "bytes": 3772,
+          "sha256": "cce11bfe3aaa6ae9e072ea2637caaec8795e68d9b67e655a5af16ee509681a4c"
+        },
+        {
+          "path": "merges.txt",
+          "bytes": 493869,
+          "sha256": "2df2990a395e35e8dfbc7511e08c12d56018d8d04691e0133e5d63b21e154dc6"
+        },
+        {
+          "path": "model.safetensors",
+          "bytes": 1617824864,
+          "sha256": "542566a422ae4f3fd23f1ba11add198fca01bbf82e66e6a2857b3f608b1eb9d1"
+        },
+        {
+          "path": "normalizer.json",
+          "bytes": 52666,
+          "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "bytes": 340,
+          "sha256": "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "bytes": 2186,
+          "sha256": "baea4ea09372eb4fca86b4e4346139fd73cb807d5087e9de0948e971739c3e74"
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 2710337,
+          "sha256": "297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 282843,
+          "sha256": "844b642c73a91359722f47b35705f7174686df33d252695d8572cf9ac03a6389"
+        },
+        {
+          "path": "vocab.json",
+          "bytes": 1036558,
+          "sha256": "e2aa043ef015641d363d8288e7c241c85e36a5c761fb303598e0710233344387"
+        }
+      ],
+      "note": "Whisper large-v3-turbo: transcribes every take so Claude can check the words survived the effects. MIT."
+    },
+    {
+      "name": "omnivoice",
+      "source": "https://huggingface.co/k2-fsa/OmniVoice",
+      "revision": "c5fdb5ccb189668d56333f77ba2629f4cd7535f4",
+      "base_url": "https://huggingface.co/k2-fsa/OmniVoice/resolve/c5fdb5ccb189668d56333f77ba2629f4cd7535f4",
+      "dest": "models/omnivoice",
+      "files": [
+        {
+          "path": "audio_tokenizer/LICENSE",
+          "bytes": 9171,
+          "sha256": "ac933dc084d119bd20401956b90d11ae87c248b2da62622cd580d82cdf2fa049"
+        },
+        {
+          "path": "audio_tokenizer/README.md",
+          "bytes": 5174,
+          "sha256": "0336368f8274a5ed09f54cee8d56a851ecee96026d9f391a6735762c16608a60"
+        },
+        {
+          "path": "audio_tokenizer/config.json",
+          "bytes": 2531,
+          "sha256": "eefb20806f7104e77c9a5277c9df0f9bb8826b08eb1d4e8ab2b9829b6ef9fac1"
+        },
+        {
+          "path": "audio_tokenizer/model.safetensors",
+          "bytes": 805665628,
+          "sha256": "fe7c5e8785e0a05833e1bfc3e002ec7f55af21e306b2e7154a448c1f54ccfb0d"
+        },
+        {
+          "path": "audio_tokenizer/preprocessor_config.json",
+          "bytes": 206,
+          "sha256": "ae61eea88558608ee2fa86d2aec9fce8d99a5ff75d09cb7651ccce21ae1d9084"
+        },
+        {
+          "path": "chat_template.jinja",
+          "bytes": 4168,
+          "sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8"
+        },
+        {
+          "path": "config.json",
+          "bytes": 2238,
+          "sha256": "5e359117e13b420c5e0c925d4aba650d624767131f1d1746928f8b850d5dc372"
+        },
+        {
+          "path": "model.safetensors",
+          "bytes": 2450344112,
+          "sha256": "730839316de585f4c8298ec0e1712efc10fb19c6fa4e36eb741cb8d51ebcf6aa"
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 11423986,
+          "sha256": "408f669b7e2b045fdf54201d815bd364e6667dbd845115da81239c40bc6dcfd1"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 533,
+          "sha256": "49f78845596a82bf15c83673794bdf9f76f812b11f60ab6a2239d9be65b00676"
+        }
+      ],
+      "note": "OmniVoice: the Romanian engine (600+ languages, voice design by attributes, cloning). CC-BY-NC."
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "description": "Doom-style demon: the human voice pitched down with its throat enlarged, an octave-down layer and a sub rumble, a resonant metal-tube layer, parallel distortion, a mid-bass scoop. Organic and monstrous rather than mechanical.",
+  "instruction": "A huge, ancient male voice, deep resonant bass, gravelly and subterranean. Speaks slowly with cold menace and contempt, every word heavy and final.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 70
+    },
+    {
+      "op": "compress",
+      "threshold_db": -30,
+      "ratio": 4,
+      "attack_ms": 4,
+      "release_ms": 120,
+      "makeup_db": 6
+    },
+    {
+      "op": "stretch",
+      "rate": 0.92
+    }
+  ],
+  "buses": [
+    {
+      "name": "main",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -4
+        }
+      ]
+    },
+    {
+      "name": "octave",
+      "gain_db": -5,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -12
+        },
+        {
+          "op": "lowpass",
+          "hz": 1600
+        },
+        {
+          "op": "drive",
+          "drive_db": 8,
+          "mix": 0.5
+        }
+      ]
+    },
+    {
+      "name": "rumble",
+      "gain_db": -12,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -24
+        },
+        {
+          "op": "lowpass",
+          "hz": 220
+        }
+      ]
+    },
+    {
+      "name": "metal",
+      "gain_db": 2,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -4
+        },
+        {
+          "op": "highpass",
+          "hz": 180
+        },
+        {
+          "op": "comb",
+          "delay_ms": 3.4,
+          "feedback": 0.7,
+          "mix": 1.0
+        },
+        {
+          "op": "ringmod",
+          "hz": 58,
+          "mix": 0.5
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "op": "drive",
+      "drive_db": 22,
+      "mix": 0.3
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "lowshelf",
+          "hz": 100,
+          "gain_db": 7
+        },
+        {
+          "type": "peak",
+          "hz": 320,
+          "gain_db": -6,
+          "q": 0.5
+        },
+        {
+          "type": "peak",
+          "hz": 2800,
+          "gain_db": 3,
+          "q": 1.0
+        },
+        {
+          "type": "lowpass",
+          "hz": 9500
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

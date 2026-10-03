@@ -1,0 +1,12 @@
+{
+  "description": "No effects: the TTS voice as generated, resampled to 48 kHz and peak-normalised. Use it to judge the base voice.",
+  "instruction": "",
+  "pre": [],
+  "buses": [
+    {
+      "name": "dry",
+      "chain": []
+    }
+  ],
+  "post": []
+}

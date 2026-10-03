@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>local-voice</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #dddad3; --sunk: #efede8;
+    --accent: #b3261e; --accent-ink: #fff; --ok: #1f7a3a; --warn: #a15c00;
+    --tip-bg: #1d1d1f; --tip-ink: #f6f5f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f0f11; --panel: #18181b; --ink: #ececef; --muted: #9a9aa2; --line: #2b2b30; --sunk: #121215;
+            --accent: #e5483d; --accent-ink: #fff; --ok: #46b06a; --warn: #e0a040;
+            --tip-bg: #ececef; --tip-ink: #18181b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: .02em; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 12px 0 4px;
+          text-transform: uppercase; letter-spacing: .05em; }
+  label:first-child { margin-top: 0; }
+  textarea, input, select { width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+          border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  input:disabled { opacity: .45; }
+  textarea { resize: vertical; }
+  #text { min-height: 84px; }
+  #instruction { min-height: 64px; font-size: 14px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; align-items: end; }
+  .row label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .checks { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; }
+  .checks label { display: inline-flex; gap: 6px; align-items: center; text-transform: none;
+                  letter-spacing: 0; font-weight: 400; color: var(--ink); margin: 0; }
+  .checks input { width: auto; }
+  .actions { display: flex; gap: 10px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; border-radius: 6px; padding: 8px 16px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: progress; }
+  #status { color: var(--muted); font-size: 13px; }
+  .take { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-top: 14px; }
+  .take .meta { font-size: 12px; color: var(--muted); font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+  .take .said { margin: 6px 0 10px; }
+  .take audio { width: 100%; margin: 4px 0; }
+  .take .lbl { font-size: 12px; color: var(--muted); }
+  .take .heard { font-size: 13px; margin-top: 6px; }
+  .good { color: var(--ok); } .bad { color: var(--warn); }
+  .take img { width: 100%; border-radius: 6px; margin-top: 8px; }
+  .take .dl { font-size: 12px; margin-left: 8px; }
+  .take .dl a { color: var(--muted); margin-right: 8px; }
+  .take .warn { font-size: 13px; color: var(--warn); margin-top: 6px; }
+  .take .bottom { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; margin-top: 12px; }
+  .fxbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px;
+           background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; }
+  .fxbox .boxlbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .fxbox select { width: auto; background: var(--panel); }
+  .fxbox input.small { width: 68px; padding: 6px 8px; background: var(--panel); }
+  .take .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #tip { position: fixed; z-index: 10; max-width: 340px; padding: 8px 10px; border-radius: 6px;
+         background: var(--tip-bg); color: var(--tip-ink); font-size: 13px; line-height: 1.4;
+         pointer-events: none; opacity: 0; transition: opacity .12s; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+  #tip.on { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <h1>local-voice</h1>
+  <p class="sub">Voice-design TTS + machine-voice effects, on this machine only. Hover over anything for 1 s to see what it does.</p>
+
+  <div class="panel">
+    <label for="text" data-tip="The line to speak. English vocal events work inline: (sigh), (laugh), (clears throat). Ctrl+Enter speaks.">Text</label>
+    <textarea id="text" data-tip="The line to speak. English vocal events work inline: (sigh), (laugh), (clears throat). Ctrl+Enter speaks.">Your civilization is a flicker in the dark. We are the dark, and we have always been here.</textarea>
+
+    <div class="row">
+      <div data-tip="Which TTS model speaks. English uses Breeze TTS 2, which designs a voice from a free-text description. Romanian uses OmniVoice, which designs from fixed attributes or copies a kept voice.">
+        <label for="lang">Language</label>
+        <select id="lang">
+          <option value="en">English</option>
+          <option value="ro">Romanian</option>
+        </select>
+      </div>
+      <div data-tip="The sound-design chain applied to the voice. reaper-drone: one unmoving brass pitch speaks the words. reaper: the same, loosely following intonation. harbinger: a synth chord stepping in semitones. demon: organic and monstrous. dry: no effects.">
+        <label for="preset">Effects preset</label>
+        <select id="preset"></select>
+      </div>
+      <div data-tip="Blank for a random take. Enter a number to reproduce a take exactly. The base voice varies a lot by seed, so rerolling is the main way to find a good one.">
+        <label for="seed">Seed</label>
+        <input id="seed" placeholder="random">
+      </div>
+      <div id="cfgBox" data-tip="Instruction strength, English only: how strictly the model follows the voice description. 4 is the recommended value; 1 follows it loosely; above about 5-6 tends to sound forced or strained. Range 0.5-10.">
+        <label for="cfg">Strength</label>
+        <input id="cfg" type="number" value="4" min="0.5" max="10" step="0.5">
+      </div>
+      <div id="speedBox" data-tip="Romanian only. The model's own speaking rate, 0.75-1.3 (default 0.85). Below about 0.75 the model starts repeating words, so for slower speech use Tempo instead.">
+        <label for="speed">Speed</label>
+        <input id="speed" type="number" value="0.85" min="0.75" max="1.3" step="0.05">
+      </div>
+      <div data-tip="Semitones, -12 to +12, applied to the finished sound. Negative is lower and bigger: the machine's tone and the size of its throat move down together. -3 to -5 is a good start; -12 is an octave down. Re-run effects to try another value without regenerating.">
+        <label for="pitch">Pitch</label>
+        <input id="pitch" type="number" value="0" min="-12" max="12" step="1">
+      </div>
+      <div data-tip="Space added after everything else. None keeps the voice clean and close (best if you'll add your own room later). Light: a large room. Medium: a concert hall. Heavy: a cathedral, with a long tail.">
+        <label for="reverb">Reverb</label>
+        <select id="reverb"><option value="none">None</option><option value="room">Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option></select>
+      </div>
+      <div data-tip="Time-stretch of the finished sound, 0.5-1.5: below 1 is slower, without changing pitch. Works in both languages. Re-run effects to try another value without regenerating.">
+        <label for="tempo">Tempo</label>
+        <input id="tempo" type="number" value="1" min="0.5" max="1.5" step="0.05">
+      </div>
+    </div>
+    <div id="presetDesc" class="hint"></div>
+
+    <label for="instruction" id="instructionLbl">Voice and mood</label>
+    <textarea id="instruction"></textarea>
+    <div id="instructionHint" class="hint"></div>
+
+    <div class="checks">
+      <label data-tip="After generating, Whisper transcribes both the raw and the processed audio and shows what share of your words it heard (a check that the effects didn't bury the speech), plus a spectrogram. Adds about a second."><input type="checkbox" id="check"> Transcribe + spectrogram</label>
+      <label data-tip="When ticked, new lines reuse the exact voice of the take you marked with 'Keep this voice', so a whole scene sounds like one speaker. Works across languages: an English take's voice can speak Romanian."><input type="checkbox" id="useLike" disabled> Keep voice of take <span id="likeId">-</span></label>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="go" data-tip="Generate the take: about 5-10 s for a sentence or two in English, about 1-2 s in Romanian. The first take after a start also loads the model; the very first Romanian line also makes the house voice (about 30 s).">Speak</button>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div id="takes"></div>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let presets = {};
+let likeTake = null;
+
+// ------------------------------------------------------------------ tooltips
+// Native title tooltips can't be delayed, so: any element with data-tip shows
+// its text after 1 s of hover (or keyboard focus), and hides on leave or click.
+const TIP_DELAY = 1000;
+let tipTimer = null;
+function tipFor(target) { const t = target.closest && target.closest("[data-tip]"); return t; }
+function showTip(t) {
+  const tip = $("tip");
+  tip.textContent = t.dataset.tip;
+  const r = t.getBoundingClientRect();
+  tip.style.left = "0px"; tip.style.top = "0px"; tip.classList.add("on");
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+}
+function hideTip() { clearTimeout(tipTimer); tipTimer = null; $("tip").classList.remove("on"); }
+let tipTarget = null;
+document.addEventListener("mouseover", (e) => {
+  const t = tipFor(e.target);
+  if (t === tipTarget) return;
+  hideTip(); tipTarget = t;
+  if (t) tipTimer = setTimeout(() => showTip(t), TIP_DELAY);
+});
+document.addEventListener("focusin", (e) => {
+  const t = tipFor(e.target);
+  hideTip(); tipTarget = t;
+  if (t) tipTimer = setTimeout(() => showTip(t), TIP_DELAY);
+});
+document.addEventListener("mousedown", hideTip);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+window.addEventListener("scroll", hideTip, true);
+
+// ------------------------------------------------------------------ helpers
+function setBusy(on, msg) {
+  $("go").disabled = on;
+  document.querySelectorAll(".rerun").forEach(b => b.disabled = on);
+  $("status").textContent = msg || "";
+}
+
+async function api(path, body) {
+  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)) : r.statusText);
+  return j;
+}
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "tip") e.dataset.tip = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of kids) if (c != null) e.append(c);
+  return e;
+}
+
+// ------------------------------------------------------------------ language + description
+const isRo = () => $("lang").value !== "en";
+const stockDescriptions = () => Object.values(presets).map(x => x.instruction);
+let houseVoice = null;
+
+const TIP_DESC_EN = "Free-text description the model builds the voice from: size, age, timbre, pitch, pace, emotion, attitude. The machine timbre comes from the preset, but pacing, pauses and emphasis come from here. Deeper and slower works best with the Reaper presets.";
+const TIP_DESC_RO = "Leave empty to clone the house voice: a deep English Reaper voice, so Romanian sounds like the English takes. Or design a voice from fixed attributes, comma-separated, one per group: gender (male, female), age (child, teenager, young adult, middle-aged, elderly), pitch (very low pitch ... very high pitch), style (whisper). Designed Romanian voices are higher and smaller than the house voice. Ignored when 'Keep voice of take' is on.";
+
+function syncLanguage() {
+  const ro = isRo();
+  $("cfg").disabled = ro; $("speed").disabled = !ro;
+  $("instructionLbl").textContent = ro ? "Voice attributes (optional)" : "Voice and mood";
+  $("instructionLbl").dataset.tip = $("instruction").dataset.tip = ro ? TIP_DESC_RO : TIP_DESC_EN;
+  $("instruction").placeholder = ro ? "empty = the house voice · or e.g. male, elderly, very low pitch" : "";
+  syncHouseHint();
+  // Swap in the right kind of default unless the user wrote their own.
+  const cur = $("instruction").value.trim();
+  if (ro && stockDescriptions().includes(cur)) $("instruction").value = "";
+  if (!ro && !cur) $("instruction").value = presets[$("preset").value]?.instruction || "";
+  $("text").setAttribute("lang", ro ? "ro" : "en");
+}
+
+function syncHouseHint() {
+  $("instructionHint").textContent = !isRo() ? "" : houseVoice
+    ? `Empty = clone the house voice (take ${houseVoice.id}, ${houseVoice.f0_hz} Hz). Change it with "Set as house voice" on any take.`
+    : "Empty = clone the house voice, which is made automatically (deep English Reaper) on the first Romanian line.";
+}
+
+async function loadHouse() {
+  try { const h = await api("/api/house-voice"); houseVoice = h.id ? h : null; } catch (e) { houseVoice = null; }
+  syncHouseHint();
+}
+
+function showPreset() {
+  $("presetDesc").textContent = (presets[$("preset").value] || {}).description || "";
+}
+
+$("lang").addEventListener("change", syncLanguage);
+$("preset").addEventListener("change", () => {
+  const cur = $("instruction").value.trim();
+  if (!isRo() && (!cur || stockDescriptions().includes(cur))) $("instruction").value = presets[$("preset").value]?.instruction || "";
+  showPreset();
+});
+
+// ------------------------------------------------------------------ takes
+function audio(name) { return el("audio", {controls: "", preload: "auto", src: "/files/" + encodeURIComponent(name)}); }
+
+function renderTake(res, autoplay) {
+  const box = el("div", {class: "take"});
+  const lang = res.language || "en";
+  box.append(el("div", {class: "meta", tip: "Take id · language · seed · preset · length · generation time. The id is what --like and --fx take on the command line."},
+    `${res.id} · ${lang} · seed ${res.seed} · ${res.preset}${res.pitch ? ` · pitch ${res.pitch > 0 ? "+" : ""}${res.pitch}` : ""}${res.tempo && res.tempo !== 1 ? ` · tempo ${res.tempo}` : ""}${res.reverb && res.reverb !== "none" ? ` · ${res.reverb}` : ""} · ${res.duration_s}s · gen ${res.gen_s ?? "-"}s`));
+  box.append(el("div", {class: "said"}, res.text));
+  if (res.instruction) box.append(el("div", {class: "meta", tip: "The voice description used for this take."}, "voice: " + res.instruction));
+  else if (res.house_voice) box.append(el("div", {class: "meta", tip: "This Romanian take cloned the house voice."}, "voice: house voice (take " + res.like + ")"));
+  else if (res.like) box.append(el("div", {class: "meta", tip: "This take reused the voice of an earlier take."}, "voice of take " + res.like));
+
+  const dl = el("span", {class: "dl"},
+    el("a", {href: "/files/" + encodeURIComponent(res.files.wet), download: res.files.wet, tip: "Download the processed audio as WAV (lossless, 48 kHz)."}, "WAV"),
+    res.files.mp3 ? el("a", {href: "/files/" + encodeURIComponent(res.files.mp3), download: res.files.mp3, tip: "Download as MP3: what WhatsApp and most messengers accept."}, "MP3") : null);
+  box.append(el("div", {class: "lbl", tip: "The final audio with the preset applied (48 kHz). Plays automatically when the take arrives."}, "processed", dl));
+  for (const w of (res.warnings || [])) box.append(el("div", {class: "warn"}, "⚠ " + w));
+  if (res.sentences && res.sentences.some(x => x.tries > 1)) {
+    const fixed = res.sentences.filter(x => x.tries > 1).length;
+    box.append(el("div", {class: "meta", tip: "Romanian is generated a sentence at a time, and each sentence is checked with Whisper. A sentence with missing words is regenerated on a new seed, up to 3 tries, keeping the best."},
+      `${fixed} of ${res.sentences.length} sentence(s) were regenerated to recover missing words`));
+  }
+  const wet = audio(res.files.wet); box.append(wet);
+  if (res.files.dry) {
+    box.append(el("div", {class: "lbl", tip: "The model's raw output before effects (24 kHz): judge the base voice here. Is it deep and slow enough, and are the words right?"}, "dry voice"));
+    box.append(audio(res.files.dry));
+  }
+  if (res.heard) {
+    for (const k of ["wet", "dry"]) {
+      const m = res.match[k];
+      const loop = (res.asr_unreliable || []).includes(k);
+      box.append(el("div", {class: "heard", tip: "What Whisper heard. Green: 85% or more of your words. Amber: fewer, so the effects may be burying the speech or the model fluffed a word. 'Whisper looped' means the transcript is unreliable: listen instead."},
+        el("span", {class: (m >= 0.85 && !loop) ? "good" : "bad"}, `${k}: ${Math.round(m * 100)}% of words heard${loop ? " (Whisper looped: unreliable)" : ""}`), " — ", res.heard[k]));
+    }
+  }
+  if (res.check_error) box.append(el("div", {class: "warn"}, "Transcription check failed (the take itself is fine): " + res.check_error));
+  if (res.files.spectrogram) box.append(el("img", {src: "/files/" + encodeURIComponent(res.files.spectrogram), alt: "spectrogram",
+    tip: "Waveform and spectrogram of the processed audio: energy over time and frequency. Speech shows formant bands and gaps between words."}));
+
+  const sel = el("select", {tip: "Pick another preset for this same take."});
+  for (const k of Object.keys(presets)) sel.append(el("option", {value: k}, k));
+  sel.value = res.preset;
+  const pitchIn = el("input", {type: "number", value: res.pitch ?? 0, min: -12, max: 12, step: 1, class: "small",
+    tip: "Pitch in semitones for the re-run: negative is lower and bigger."});
+  const tempoIn = el("input", {type: "number", value: res.tempo ?? 1, min: 0.5, max: 1.5, step: 0.05, class: "small",
+    tip: "Tempo for the re-run: below 1 is slower, same pitch."});
+  const revIn = el("select", {class: "small", tip: "Reverb for the re-run."});
+  revIn.innerHTML = '<option value="none">None</option><option value="room">Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option>';
+  revIn.value = res.reverb || "none";
+  const rerun = el("button", {class: "rerun", tip: "Apply the chosen preset, pitch, tempo and reverb to this same performance in a second or two, without regenerating. Adds a new card, so you can compare.",
+    onclick: async () => {
+      setBusy(true, "Re-applying effects…");
+      try {
+        renderTake(await api("/api/fx", {id: res.id, preset: sel.value, check: $("check").checked,
+          pitch: parseFloat(pitchIn.value) || 0, tempo: parseFloat(tempoIn.value) || 1, reverb: revIn.value}), true);
+        setBusy(false);
+      } catch (e) { setBusy(false, "Error: " + e.message); }
+    }}, "Re-run effects");
+  const fxbox = el("div", {class: "fxbox"}, el("span", {class: "boxlbl"}, "Effects"), sel,
+    el("span", {class: "boxlbl"}, "pitch"), pitchIn, el("span", {class: "boxlbl"}, "tempo"), tempoIn,
+    el("span", {class: "boxlbl"}, "reverb"), revIn, rerun);
+
+  const tools = el("div", {class: "tools"},
+    el("button", {tip: "Lock this take's voice for your next lines, in any language, so a scene sounds like one speaker.",
+      onclick: () => { likeTake = res.id; $("likeId").textContent = res.id; $("useLike").disabled = false; $("useLike").checked = true; }}, "Keep this voice"),
+    el("button", {tip: "Make this take's voice the house voice: what Romanian lines clone when you leave the voice attributes empty. Best with a deep English take.",
+      onclick: async () => {
+        try { houseVoice = await api("/api/house-voice", {id: res.id}); syncHouseHint(); $("status").textContent = `House voice is now take ${res.id} (${houseVoice.f0_hz} Hz).`; }
+        catch (e) { $("status").textContent = "Error: " + e.message; }
+      }}, "Set as house voice"),
+    el("button", {tip: "Copy this take's text, language, seed and voice description back into the panel above, to tweak one thing and regenerate.",
+      onclick: () => {
+        $("text").value = res.text; $("seed").value = res.seed;
+        $("lang").value = ["en", "ro"].includes(lang) ? lang : "en"; syncLanguage();
+        $("instruction").value = res.instruction || "";
+        if (res.speed) $("speed").value = res.speed;
+        $("pitch").value = res.pitch ?? 0; $("tempo").value = res.tempo ?? 1; $("reverb").value = res.reverb || "none";
+        if (res.cfg_scale) $("cfg").value = res.cfg_scale;
+      }}, "Load settings"));
+  box.append(el("div", {class: "bottom"}, fxbox, tools));
+
+  $("takes").prepend(box);
+  if (autoplay) wet.play().catch(() => {});
+}
+
+$("go").addEventListener("click", async () => {
+  const text = $("text").value.trim();
+  if (!text) { $("status").textContent = "Write something to say."; return; }
+  const seed = $("seed").value.trim();
+  const body = {
+    text, instruction: $("instruction").value, preset: $("preset").value, language: $("lang").value,
+    seed: seed ? parseInt(seed, 10) : null, like: $("useLike").checked ? likeTake : null, check: $("check").checked,
+    pitch: parseFloat($("pitch").value) || 0, tempo: parseFloat($("tempo").value) || 1, reverb: $("reverb").value,
+  };
+  // Keeping a voice with the stock description would steer away from it: send none, for a pure clone.
+  if (body.like && stockDescriptions().includes(body.instruction.trim())) body.instruction = null;
+  if (isRo()) { body.speed = parseFloat($("speed").value) || 0.85; if (body.instruction !== null && !body.instruction.trim()) body.instruction = null; }
+  else body.cfg_scale = parseFloat($("cfg").value) || 4;
+  setBusy(true, "Speaking… (the first take after a start also loads the model)");
+  const t0 = performance.now();
+  try {
+    const res = await api("/api/speak", body);
+    renderTake(res, true);
+    if (res.house_voice && !houseVoice) await loadHouse();
+    setBusy(false, `Done in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+  }
+  catch (e) { setBusy(false, "Error: " + e.message); }
+});
+
+$("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKey) $("go").click(); });
+
+(async () => {
+  try {
+    presets = await api("/api/presets");
+    for (const k of Object.keys(presets)) $("preset").append(el("option", {value: k}, k));
+    $("preset").value = presets["reaper-drone"] ? "reaper-drone" : Object.keys(presets)[0];
+    $("instruction").value = presets[$("preset").value].instruction || "";
+    showPreset();
+    syncLanguage();
+    await loadHouse();
+  } catch (e) { $("status").textContent = "Server not reachable: " + e.message; }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# local-voice's own dependencies, on top of the Breeze TTS 2 engine's
+# (engine/breeze-tts/requirements.txt, minus torch, which install.ps1 takes
+# from the CUDA wheel index). Everything here has Windows wheels. Pinned to the
+# versions the presets were tuned with: a newer DSP library can change the sound.
+pedalboard==0.9.25        # Spotify's effects: pitch shift, EQ, distortion, reverb
+praat-parselmouth==0.4.7  # formant shifting (a bigger "vocal tract")
+matplotlib==3.11.2           # spectrogram PNGs for the review loop
+scipy==1.18.1              # filters for the vocoder and comb
+pytest==9.1.1                # tests/ (optional)
+num2words==0.5.14         # the Whisper check normalises Romanian numbers like the TTS does

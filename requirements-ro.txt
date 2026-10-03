@@ -1,0 +1,13 @@
+# The Romanian engine's venv (.venv-ro): OmniVoice needs transformers 5.x, which
+# can't share an environment with Breeze TTS 2 (it pins 4.57). install.ps1 installs
+# torch from the CUDA index first, then OmniVoice itself with --no-deps (its PyPI
+# metadata pins an older torch and would swap out the CUDA build), then this list.
+# Versions are the ones this repo was tested with.
+transformers==5.18.0
+accelerate==1.15.0
+soundfile==0.14.0
+librosa==1.0.0
+pydub==0.25.1
+audioop-lts==0.2.2; python_version >= "3.13"   # pydub needs audioop, removed in 3.13
+numpy>=2.0
+num2words==0.5.14                              # spells out numbers in Romanian

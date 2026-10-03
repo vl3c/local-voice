@@ -1,0 +1,50 @@
+# This repo tracks ONLY first-party source: the server, effects, scripts, docs.
+# Everything install.ps1 creates, every weight download_models.py fetches, and
+# every take you generate is ignored. After a fresh install `git status` must
+# still be clean.
+
+# --- your audio ------------------------------------------------------------
+# Whole directories, not extensions: takes, transcripts, spectrograms and any
+# reference audio you bring in. Nothing in here is ever tracked.
+input/
+output/
+temp/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.pcm
+*.png
+
+# --- everything install.ps1 creates ----------------------------------------
+engine/
+.venv/
+.venv-*/
+venv/
+models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+*.onnx
+
+# --- python noise ----------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# --- secrets and local tool state ------------------------------------------
+.env
+.env.*
+.claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# Scratch presets: name them _something.json to experiment without tracking them
+voicefx/presets/_*.json
