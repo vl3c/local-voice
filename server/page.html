@@ -91,15 +91,15 @@
       </div>
       <div data-tip="Blank for a random take. Enter a number to reproduce a take exactly. The base voice varies a lot by seed, so rerolling is the main way to find a good one.">
         <label for="seed">Seed</label>
-        <input id="seed" placeholder="random">
+        <input id="seed" value="74525860" placeholder="random">
       </div>
       <div id="cfgBox" data-tip="Instruction strength, English only: how strictly the model follows the voice description. 4 is the recommended value; 1 follows it loosely; above about 5-6 tends to sound forced or strained. Range 0.5-10.">
         <label for="cfg">Strength</label>
         <input id="cfg" type="number" value="4" min="0.5" max="10" step="0.5">
       </div>
-      <div id="speedBox" data-tip="Romanian only. The model's own speaking rate, 0.75-1.3 (default 0.85). Below about 0.75 the model starts repeating words, so for slower speech use Tempo instead.">
+      <div id="speedBox" data-tip="Romanian only. The model's own speaking rate, 0.75-1.3 (default 0.9). Below about 0.75 the model starts repeating words, so for slower speech use Tempo instead.">
         <label for="speed">Speed</label>
-        <input id="speed" type="number" value="0.85" min="0.75" max="1.3" step="0.05">
+        <input id="speed" type="number" value="0.9" min="0.75" max="1.3" step="0.05">
       </div>
       <div data-tip="Semitones, -12 to +12, applied to the finished sound. Negative is lower and bigger: the machine's tone and the size of its throat move down together. -3 to -5 is a good start; -12 is an octave down. Re-run effects to try another value without regenerating.">
         <label for="pitch">Pitch</label>
@@ -107,7 +107,7 @@
       </div>
       <div data-tip="Space added after everything else. None keeps the voice clean and close (best if you'll add your own room later). Light: a large room. Medium: a concert hall. Heavy: a cathedral, with a long tail.">
         <label for="reverb">Reverb</label>
-        <select id="reverb"><option value="none">None</option><option value="room">Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option></select>
+        <select id="reverb"><option value="none">None</option><option value="room" selected>Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option></select>
       </div>
       <div data-tip="Time-stretch of the finished sound, 0.5-1.5: below 1 is slower, without changing pitch. Works in both languages. Re-run effects to try another value without regenerating.">
         <label for="tempo">Tempo</label>
@@ -121,7 +121,7 @@
     <div id="instructionHint" class="hint"></div>
 
     <div class="checks">
-      <label data-tip="After generating, Whisper transcribes both the raw and the processed audio and shows what share of your words it heard (a check that the effects didn't bury the speech), plus a spectrogram. Adds about a second."><input type="checkbox" id="check"> Transcribe + spectrogram</label>
+      <label data-tip="After generating, Whisper transcribes both the raw and the processed audio and shows what share of your words it heard (a check that the effects didn't bury the speech), plus a spectrogram. Adds about a second."><input type="checkbox" id="check" checked> Transcribe + spectrogram</label>
       <label data-tip="When ticked, new lines reuse the exact voice of the take you marked with 'Keep this voice', so a whole scene sounds like one speaker. Works across languages: an English take's voice can speak Romanian."><input type="checkbox" id="useLike" disabled> Keep voice of take <span id="likeId">-</span></label>
     </div>
 
@@ -204,6 +204,8 @@ function el(tag, attrs = {}, ...kids) {
 const isRo = () => $("lang").value !== "en";
 const stockDescriptions = () => Object.values(presets).map(x => x.instruction);
 let houseVoice = null;
+// The page's starting settings (the API's own defaults are separate: reaper-drone, random seed, no reverb).
+const DEFAULT_PRESET = "harbinger";
 
 const TIP_DESC_EN = "Free-text description the model builds the voice from: size, age, timbre, pitch, pace, emotion, attitude. The machine timbre comes from the preset, but pacing, pauses and emphasis come from here. Deeper and slower works best with the Reaper presets.";
 const TIP_DESC_RO = "Leave empty to clone the house voice: a deep English Reaper voice, so Romanian sounds like the English takes. Or design a voice from fixed attributes, comma-separated, one per group: gender (male, female), age (child, teenager, young adult, middle-aged, elderly), pitch (very low pitch ... very high pitch), style (whisper). Designed Romanian voices are higher and smaller than the house voice. Ignored when 'Keep voice of take' is on.";
@@ -341,7 +343,7 @@ $("go").addEventListener("click", async () => {
   };
   // Keeping a voice with the stock description would steer away from it: send none, for a pure clone.
   if (body.like && stockDescriptions().includes(body.instruction.trim())) body.instruction = null;
-  if (isRo()) { body.speed = parseFloat($("speed").value) || 0.85; if (body.instruction !== null && !body.instruction.trim()) body.instruction = null; }
+  if (isRo()) { body.speed = parseFloat($("speed").value) || 0.9; if (body.instruction !== null && !body.instruction.trim()) body.instruction = null; }
   else body.cfg_scale = parseFloat($("cfg").value) || 4;
   setBusy(true, "Speaking… (the first take after a start also loads the model)");
   const t0 = performance.now();
@@ -360,7 +362,7 @@ $("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKe
   try {
     presets = await api("/api/presets");
     for (const k of Object.keys(presets)) $("preset").append(el("option", {value: k}, k));
-    $("preset").value = presets["reaper-drone"] ? "reaper-drone" : Object.keys(presets)[0];
+    $("preset").value = presets[DEFAULT_PRESET] ? DEFAULT_PRESET : Object.keys(presets)[0];
     $("instruction").value = presets[$("preset").value].instruction || "";
     showPreset();
     syncLanguage();

@@ -23,7 +23,8 @@ only judge of how it *sounds*: send them the files early and let them steer.
 "Make the Reaper say: *Your extinction is not a tragedy. It is a correction.*"
 
 1. **Check** the GPU and the server (step 1). Start the server if needed.
-2. **Draft** 2-3 takes with different seeds and `--check` (step 2).
+2. **Draft:** start with the house defaults (just the text); for alternatives, add
+   `--seed random` for 2-3 takes (step 2).
 3. **Read** the transcripts: wet below ~85% of words means the effects are burying the speech.
    Open the spectrogram PNG with Read if something looks odd.
 4. **Iterate:** another seed (the base voice varies a lot between seeds), a different
@@ -101,21 +102,27 @@ python "<base dir>/scripts/say.py" "<text>" --format mp3 --out <dir>     # for W
 python "<base dir>/scripts/say.py" --presets
 ```
 
+**House defaults.** With nothing but the text, you get the house voice: the `harbinger` preset,
+seed `74525860` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
+tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
+per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
+take, `--no-check` (API: `"check": false`) to skip the check.
+
 | Flag | Meaning |
 |---|---|
-| `--preset NAME` | Effects preset (default `reaper-drone`). `--presets` lists them. See the table below. |
+| `--preset NAME` | Effects preset (default `harbinger`). `--presets` lists them. See the table below. |
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
 | `--instruction "..."` | The voice description. English: free text, default the preset's suggested one (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the house voice (the default, and the deep one); or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
-| `--seed N` | Reproduces a take exactly. Printed every time; note it for keepers. |
+| `--seed N` | Reproduces a take exactly. Default: the house seed `74525860`; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
 | `--cfg X` | English only: how hard the model follows the instruction (default 4, Breeze's recommendation; 0.5-10, above ~5-6 tends to sound forced). |
-| `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.85). Below 0.75 it repeats words, so the server refuses it: use `--tempo` for slower. |
+| `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Below 0.75 it repeats words, so the server refuses it: use `--tempo` for slower. |
 | `--pitch N` | Semitones, -12..12, on the finished sound: negative is lower and bigger (tone and "throat" move together). -3 to -5 is a good start. |
 | `--tempo X` | Time-stretch, 0.5-1.5, same pitch: below 1 is slower. |
-| `--reverb KIND` | `none` (default: clean output, room added in the mix), `room`, `hall`, `cathedral`. |
+| `--reverb KIND` | `none` (dry: for a take that will get its own room in a mix), `room` (default), `hall`, `cathedral`. |
 | `--house-voice [TAKE]` | Show the house voice, or set it to TAKE. |
 | `--like TAKE` | Keep an earlier take's voice for a new line: use it for multi-line scenes so every line sounds like the same Reaper. Works across languages: Romanian lines can clone an English take's voice (and the reverse). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
-| `--check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. |
+| `--check` / `--no-check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. **On by default**; `--no-check` saves ~1 s when you don't need it. |
 | `--out DIR` / `--name STEM` | Copy the processed audio and the dry WAV to DIR (never overwrites). |
 | `--format F` | With `--out`: `both` (default), `wav` or `mp3`. **WhatsApp and most messengers reject WAV**: give the user MP3 for those. Every take gets an MP3 automatically. |
 | `--wait S` | Wait up to S seconds for the server. |
@@ -125,9 +132,9 @@ python "<base dir>/scripts/say.py" --presets
 
 | Preset | Use it for |
 |---|---|
-| `reaper-drone` | the default: one unmoving brass pitch, the words shape a drone |
+| `reaper-drone` | one unmoving brass pitch, the words shape a drone |
 | `reaper` | the same machine, loosely following the voice's intonation |
-| `harbinger` | a synth chord snapping to semitones, ring-mod shimmer, heavy distortion |
+| `harbinger` | the default: a synth chord snapping to semitones, ring-mod shimmer, heavy distortion |
 | `demon` | organic and monstrous rather than mechanical: a demon more than a machine |
 | `dry` | the base voice, no effects |
 

@@ -47,7 +47,7 @@ mechanical. That version is kept as the `demon` preset for comparison.
 | Language | Engine | How the voice is chosen |
 |---|---|---|
 | English (`en`) | Breeze TTS 2 | a free-text description (`instruction`), strength `cfg_scale` |
-| Romanian (`ro`) | OmniVoice | by default it **clones the house voice** (below); or fixed attributes, comma-separated, e.g. `male, elderly, very low pitch`; the model's pace via `speed` (0.75-1.3, default 0.85) |
+| Romanian (`ro`) | OmniVoice | by default it **clones the house voice** (below); or fixed attributes, comma-separated, e.g. `male, elderly, very low pitch`; the model's pace via `speed` (0.75-1.3, default 0.9) |
 
 OmniVoice needs a newer `transformers` than Breeze allows, so it lives in its own venv
 (`.venv-ro`) and the server runs it as a child process (`server/omni_worker.py`), started on the
@@ -80,9 +80,9 @@ Breeze keeps the voice but steers its delivery ("voice direction").
 
 | Preset | Character |
 |---|---|
-| `reaper-drone` | The brass machine tone does all the speaking at one unmoving pitch: a colossal drone shaped only by the words. **Default.** |
+| `reaper-drone` | The brass machine tone does all the speaking at one unmoving pitch: a colossal drone shaped only by the words. |
 | `reaper` | Like `reaper-drone`, but loosely following the voice's intonation. |
-| `harbinger` | A machine imitating speech: a synth chord (root, fifth, octave) follows the intonation but snaps to whole semitones, with ring-mod shimmer and heavy distortion. |
+| `harbinger` | A machine imitating speech: a synth chord (root, fifth, octave) follows the intonation but snaps to whole semitones, with ring-mod shimmer and heavy distortion. **Default.** |
 | `demon` | The human voice pitched down and distorted, with octave and sub layers: monstrous rather than mechanical. |
 | `dry` | No effects, for judging the base voice. |
 
@@ -138,6 +138,12 @@ console window, or run `.\stop.cmd`, to free the VRAM: it stops the server recor
 
 ### Command line (what agents use)
 
+**House defaults.** With nothing but the text, you get the house voice: the `harbinger` preset,
+seed `74525860` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
+tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
+per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
+take, `--no-check` (API: `"check": false`) to skip the check.
+
 ```powershell
 python scripts\say.py "Your civilization is a flicker in the dark." --check --out D:\clips
 python scripts\say.py "We are the end of everything." --preset harbinger --seed 7
@@ -153,19 +159,19 @@ python scripts\say.py --presets
 
 | Flag | Meaning |
 |---|---|
-| `--preset NAME` | Effects preset (default `reaper-drone`). |
+| `--preset NAME` | Effects preset (default `harbinger`). |
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
 | `--instruction "..."` | The voice description. English: free text, default the preset's suggested one, `""` for none. Romanian: attributes such as `male, elderly, very low pitch`; omitted means clone the house voice. |
-| `--seed N` | Reproduces a take exactly. |
+| `--seed N` | Reproduces a take exactly. Default: the house seed, 74525860. `random` for a new voice. |
 | `--cfg X` | English only: how hard the model follows the instruction (default 4, range 0.5-10). |
-| `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.85). Slower than that: `--tempo`. |
+| `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Slower than that: `--tempo`. |
 | `--pitch N` | Semitones, -12..12, on the finished sound (e.g. -4 for lower and bigger). |
 | `--tempo X` | Time-stretch, 0.5-1.5 (0.85 = slower, same pitch). |
-| `--reverb KIND` | `none` (default), `room` (light), `hall` (medium), `cathedral` (heavy). |
+| `--reverb KIND` | `none`, `room` (light; default), `hall` (medium), `cathedral` (heavy). |
 | `--like TAKE` | Keep an earlier take's voice for a new line, in either language, so a scene sounds like one speaker. |
 | `--house-voice [TAKE]` | Show the house voice, or set it to TAKE. |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take; no new generation. |
-| `--check` | Whisper transcribes dry and processed audio, prints a words-heard score, and draws a spectrogram. |
+| `--check` / `--no-check` | Whisper transcribes dry and processed audio, prints a words-heard score, and draws a spectrogram. On by default. |
 | `--out DIR` / `--name STEM` | Copy the processed audio and the dry WAV to DIR (never overwrites). |
 | `--format F` | With `--out`: `both` (default), `wav` or `mp3` for the processed audio. WhatsApp and most messengers take MP3, not WAV. |
 | `--wait S` | Wait up to S seconds for the server (startup takes ~60 s). |

@@ -462,7 +462,13 @@ def _release_cache() -> None:
 # --------------------------------------------------------------------------- API
 
 BREEZE_LANGS = {"en"}  # Breeze TTS 2; "ro" goes to OmniVoice
-OMNI_DEFAULT_SPEED = 0.85
+OMNI_DEFAULT_SPEED = 0.9
+
+# The house style, so a request with just {"text": ...} gives a good voice: the
+# Harbinger machine at a seed whose voice was picked by ear, with a light room.
+DEFAULT_PRESET = "harbinger"
+DEFAULT_SEED = 74525860
+DEFAULT_REVERB = "room"
 
 
 # The house voice: the take Romanian lines clone by default. OmniVoice's own deepest
@@ -553,9 +559,9 @@ def _house_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
 class SpeakReq(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT)
     instruction: str | None = None  # None = the default for the language (see speak())
-    preset: str = "reaper-drone"
+    preset: str = DEFAULT_PRESET
     language: str = Field("en", pattern=r"^(en|ro)$")  # en: Breeze; ro: OmniVoice
-    seed: int | None = Field(None, ge=0, lt=2**32)
+    seed: int | None = Field(DEFAULT_SEED, ge=0, lt=2**32)  # omitted: the house seed; null: random
 
     @field_validator("text")
     @classmethod
@@ -571,18 +577,18 @@ class SpeakReq(BaseModel):
     speed: float | None = Field(None, ge=0.75, le=1.3)
     pitch: float = Field(0.0, ge=-12, le=12)  # semitones, applied with the effects
     tempo: float = Field(1.0, ge=0.5, le=1.5)  # time-stretch, applied with the effects
-    reverb: Reverb = "none"  # room / hall / cathedral, applied last
+    reverb: Reverb = DEFAULT_REVERB  # none / room / hall / cathedral, applied last
     like: str | None = None  # take id whose dry voice to keep (voice direction / cloning)
-    check: bool = False
+    check: bool = True
 
 
 class FxReq(BaseModel):
     id: str
-    preset: str = "reaper-drone"
+    preset: str = DEFAULT_PRESET
     pitch: float = Field(0.0, ge=-12, le=12)
     tempo: float = Field(1.0, ge=0.5, le=1.5)
-    reverb: Reverb = "none"
-    check: bool = False
+    reverb: Reverb = DEFAULT_REVERB
+    check: bool = True
 
 
 @app.get("/api/health")

@@ -2,7 +2,8 @@
 
 The server must be running (start.cmd). Everything stays on 127.0.0.1.
 
-    python scripts/say.py "We are the dark."                                    # reaper-drone preset
+    python scripts/say.py "We are the dark."              # house defaults: harbinger, seed 74525860, light room
+    python scripts/say.py "We are the dark." --seed random --reverb none --no-check
     python scripts/say.py "..." --instruction "An ancient, colossal voice..." --seed 7
     python scripts/say.py "..." --preset harbinger --check --out some/dir
     python scripts/say.py "..." --like 20260101-120000-ab12                     # same voice as that take
@@ -93,6 +94,11 @@ def deliver(res: dict, out: Path | None, name: str | None, formats: str = "both"
     return paths
 
 
+def given(d: dict) -> dict:
+    """Drop options left unset, so the server's own defaults apply."""
+    return {k: v for k, v in d.items() if v is not None}
+
+
 def main() -> int:
     # Piped (as agents run it), Windows defaults stdout to cp1252, which can't print
     # Romanian letters such as ș and ț. A console already gets Unicode.
@@ -102,21 +108,24 @@ def main() -> int:
     ap.add_argument("text", nargs="?", help="what to say (English; (sigh)-style vocal events allowed)")
     ap.add_argument("--instruction", help="voice description. English: default the preset's suggested one ('' for "
                     "none; with --like, default is a pure clone). Romanian: attributes; default clones the house voice")
-    ap.add_argument("--preset", default="reaper-drone")
+    ap.add_argument("--preset", help="effects preset (default: harbinger)")
     ap.add_argument("--lang", default="en", choices=["en", "ro"], help="en (default): Breeze TTS 2; ro: OmniVoice")
     ap.add_argument("--speed", type=float, help="Romanian only: the model's speaking rate, 0.75-1.3, default 0.85 "
                     "(for slower than that, use --tempo)")
     ap.add_argument("--pitch", type=float, default=0.0, help="semitones, -12..12, applied with the effects "
                     "(e.g. -3 for a lower, bigger voice); works with --fx too")
-    ap.add_argument("--reverb", choices=["none", "room", "hall", "cathedral"], default="none",
-                    help="space added last: none (default), room (light), hall (medium), cathedral (heavy); "
+    ap.add_argument("--reverb", choices=["none", "room", "hall", "cathedral"],
+                    help="space added last: none, room (light; the default), hall (medium), cathedral (heavy); "
                     "works with --fx too")
     ap.add_argument("--tempo", type=float, default=1.0, help="time-stretch, 0.5-1.5, applied with the effects "
                     "(0.85 = slower, same pitch); works with --fx too")
-    ap.add_argument("--seed", type=int)
+    ap.add_argument("--seed", help="a number to reproduce a take; 'random' for a new voice "
+                    "(default: the house seed, 74525860)")
     ap.add_argument("--cfg", type=float, default=4.0, help="Breeze only: instruction strength (default 4)")
     ap.add_argument("--like", metavar="TAKE", help="keep the voice of an earlier take (voice direction)")
-    ap.add_argument("--check", action="store_true", help="transcribe with Whisper and draw a spectrogram")
+    ap.add_argument("--check", action="store_true", default=None,
+                    help="transcribe with Whisper and draw a spectrogram (on by default)")
+    ap.add_argument("--no-check", dest="check", action="store_false", help="skip the transcription check")
     ap.add_argument("--fx", metavar="TAKE", help="re-run effects on an earlier take; no new generation")
     ap.add_argument("--presets", action="store_true", help="list presets and exit")
     ap.add_argument("--house-voice", nargs="?", const="", metavar="TAKE",
@@ -129,6 +138,8 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="print the raw server response")
     args = ap.parse_args()
 
+    if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
+        ap.error("--seed takes a number or 'random'")
     if not (args.text or args.fx or args.presets or args.house_voice is not None):
         ap.error("give the text to say, or --fx TAKE, --presets or --house-voice")
     if not wait_for_server(args.wait):
@@ -145,14 +156,17 @@ def main() -> int:
               else "no house voice yet: the first Romanian line without --instruction or --like makes one")
         return 0
     if args.fx:
-        res = call("/api/fx", {"id": args.fx, "preset": args.preset, "check": args.check,
-                               "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb})
+        res = call("/api/fx", given({"id": args.fx, "preset": args.preset, "check": args.check,
+                                     "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb}))
     else:
-        res = call("/api/speak", {"text": args.text, "instruction": args.instruction, "preset": args.preset,
-                                  "seed": args.seed, "cfg_scale": args.cfg, "like": args.like,
-                                  "language": args.lang, "speed": args.speed,
-                                  "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
-                                  "check": args.check})
+        body = given({"text": args.text, "instruction": args.instruction, "preset": args.preset,
+                      "cfg_scale": args.cfg, "like": args.like,
+                      "language": args.lang, "speed": args.speed,
+                      "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
+                      "check": args.check})
+        if args.seed is not None:  # omitted: the server's house seed
+            body["seed"] = None if args.seed.lower() == "random" else int(args.seed)
+        res = call("/api/speak", body)
 
     paths = deliver(res, args.out, args.name, args.format)
     if args.json:  # machine-readable: JSON only, with the delivered paths inside
