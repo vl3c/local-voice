@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import logging
-import tempfile
+import contextlib
 import difflib
+import io
 import json
+import logging
 import os
 import queue
 import re
@@ -29,6 +30,7 @@ import socket
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import numpy as np
@@ -57,7 +59,7 @@ os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"  # qwen-tts imports gradio
 
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
-from fastapi.responses import FileResponse, HTMLResponse  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse  # noqa: E402
 from typing import Literal  # noqa: E402
 
 from pydantic import BaseModel, Field, field_validator  # noqa: E402
@@ -79,6 +81,28 @@ app = FastAPI(title="local-voice", docs_url=None, redoc_url=None, openapi_url=No
 # Refuse any Host but our own: a web page that DNS-rebinds its name to 127.0.0.1
 # must not be able to read takes or drive the server.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+
+@app.middleware("http")
+async def _same_origin_only(request, call_next):
+    """Refuse writes that a web page on another site makes the user's browser send.
+
+    Browsers label those with Origin / Sec-Fetch-Site; the CLI and curl send neither, and
+    the server's own page sends its own origin. Also forbid framing the page elsewhere.
+    """
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        if request.headers.get("sec-fetch-site") == "cross-site" or (
+                origin is not None and origin not in _own_origins(request)):
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+def _own_origins(request) -> set[str]:
+    port = request.url.port or 80
+    return {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 _lock = threading.Lock()  # one generation at a time: the models are not re-entrant
 _tts = None
 _asr = None
@@ -91,27 +115,37 @@ FAST_STAGES = ("text_encoder", "backbone_prefill", "backbone_decode", "depth_dec
 # Known-harmless startup chatter from the engine's libraries: SoX (an audio tool a
 # Breeze dependency looks for at import but never uses here) and flash-attn (an
 # optional speed-up that doesn't build on RTX 50-series; SDPA attention is used).
-_NOISE = re.compile(r"sox|flash-attn|^\*+$|if you do (not )?have|path variables|is not recognized as an internal|"
-                    r"operable program or batch file", re.I)
+_NOISE = re.compile(r"flash-attn|^\*+$", re.I)
 
 
 def _quiet_engine_imports() -> None:
-    """Import the noisy engine modules with stdout/stderr captured at the OS level (part of
-    the SoX message comes from a child process), replaying anything that isn't known noise."""
-    sys.stdout.flush(); sys.stderr.flush()
-    saved = os.dup(1), os.dup(2)
-    with tempfile.TemporaryFile(mode="w+b") as cap:
-        os.dup2(cap.fileno(), 1); os.dup2(cap.fileno(), 2)
-        try:
-            import qwen_tts  # noqa: F401  (pulls in the SoX check and the flash-attn notice)
-        finally:
-            sys.stdout.flush(); sys.stderr.flush()
-            os.dup2(saved[0], 1); os.dup2(saved[1], 2)
-            os.close(saved[0]); os.close(saved[1])
-        cap.seek(0)
-        for line in cap.read().decode("utf-8", "replace").splitlines():
-            if line.strip() and not _NOISE.search(line) and not line.strip(" -").startswith("http://sox"):
-                print(line, flush=True)
+    """Import the engine's chatty modules without their harmless startup warnings.
+
+    - SoX: a Breeze dependency imports the `sox` package, which shells out to look for the
+      SoX program and warns when it's missing. It's only used by a 25 Hz tokenizer that
+      Breeze never loads, so a stand-in module skips the check (and fails loudly if anything
+      ever does use it).
+    - flash-attn: an optional speed-up that doesn't build on RTX 50-series; a print() at
+      import says so. Python-level capture hides it; anything else printed is passed on.
+
+    Deliberately no OS-level (fd) redirection: in a console window that breaks Python's own
+    console writes and kills the server at startup.
+    """
+    if "sox" not in sys.modules:
+        stub = types.ModuleType("sox")
+
+        def _unused(*_a, **_k):
+            raise RuntimeError("SoX isn't installed or used by local-voice (sox is stubbed out)")
+
+        stub.Transformer = stub.Combiner = _unused
+        stub.NO_SOX = True
+        sys.modules["sox"] = stub
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        import qwen_tts  # noqa: F401
+    for line in (out.getvalue() + err.getvalue()).splitlines():
+        if line.strip() and not _NOISE.search(line):
+            print(line, flush=True)
 
 
 # PyTorch's compiler logs internal shape-guard notes while it warms up the fast paths.
@@ -440,7 +474,7 @@ def take_paths(tid: str) -> dict[str, Path]:
 
 
 def load_take(tid: str) -> dict:
-    if not TAKE_ID.match(tid):
+    if not TAKE_ID.fullmatch(tid):
         raise HTTPException(400, f"bad take id {tid!r}")
     p = take_paths(tid)
     if not p["meta"].is_file() or not p["dry"].is_file():
@@ -581,7 +615,7 @@ def _migrate_old_default_voice() -> None:
             tid = json.loads(old.read_text(encoding="utf-8")).get("id", "")
         except (OSError, ValueError):
             continue
-        if TAKE_ID.match(tid) and take_paths(tid)["dry"].is_file() and take_paths(tid)["meta"].is_file():
+        if TAKE_ID.fullmatch(tid) and take_paths(tid)["dry"].is_file() and take_paths(tid)["meta"].is_file():
             _store("default", tid)
             for o in OLD_VOICE_FILES:
                 o.unlink(missing_ok=True)
@@ -708,7 +742,7 @@ class Settings(BaseModel):
     language: str | None = Field(None, pattern=r"^(en|ro)$")
     preset: str | None = None
     seed: int | None = Field(None, ge=0, lt=2**32)
-    cfg_scale: float | None = Field(None, gt=0, le=10)
+    cfg_scale: float | None = Field(None, ge=0.5, le=10)
     speed: float | None = Field(None, ge=0.75, le=1.3)
     pitch: float | None = Field(None, ge=-12, le=12)
     tempo: float | None = Field(None, ge=0.5, le=1.5)
@@ -717,11 +751,17 @@ class Settings(BaseModel):
     instruction: str | None = Field(None, max_length=2000)  # English voice description; null = the preset's
 
 
+def _keep(data: dict) -> dict:
+    """Drop empty values: only `seed` may be null (it means "random"). A cleared number field
+    on the page arrives as null and must not override the defaults with nothing."""
+    return {k: v for k, v in data.items() if v is not None or k == "seed"}
+
+
 def local_settings() -> dict:
     """The user's saved settings, validated; {} if none (or the file is unreadable)."""
     try:
         raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        return Settings(**raw).model_dump(exclude_unset=True)
+        return _keep(Settings(**raw).model_dump(exclude_unset=True))
     except FileNotFoundError:
         return {}
     except Exception as exc:  # a hand-edited file with a typo: say so, use the repo defaults
@@ -729,19 +769,19 @@ def local_settings() -> dict:
         return {}
 
 
-def effective_settings() -> dict:
-    return {**REPO_DEFAULTS, **local_settings()}
+def effective_settings(saved: dict | None = None) -> dict:
+    return {**REPO_DEFAULTS, **(local_settings() if saved is None else saved)}
 
 
-def _resolve(req: BaseModel, keys: tuple[str, ...]) -> dict:
+def _resolve(req: BaseModel, keys: tuple[str, ...], saved: dict | None = None) -> dict:
     """The request's own value for each key it set; the saved/repo default otherwise."""
-    eff = effective_settings()
+    eff = effective_settings(saved)
     return {k: (getattr(req, k) if k in req.model_fields_set else eff[k]) for k in keys}
 
 
 class SpeakReq(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT)
-    instruction: str | None = None  # None = the default for the language (see speak())
+    instruction: str | None = Field(None, max_length=2000)  # None = the default for the language (see speak())
     preset: str = DEFAULT_PRESET
     language: str = Field("en", pattern=r"^(en|ro)$")  # en: Breeze; ro: OmniVoice
     seed: int | None = Field(DEFAULT_SEED, ge=0, lt=2**32)  # omitted: the default seed; null: random
@@ -754,7 +794,7 @@ class SpeakReq(BaseModel):
             raise ValueError("text is empty")
         return v
 
-    cfg_scale: float = Field(DEFAULT_CFG, gt=0, le=10)  # Breeze only
+    cfg_scale: float = Field(DEFAULT_CFG, ge=0.5, le=10)  # Breeze only
     # OmniVoice only. It sets a target length and the model fills it: much below
     # 0.75 it starts repeating words, so slower than that is `tempo`'s job.
     speed: float | None = Field(None, ge=0.75, le=1.3)
@@ -794,7 +834,8 @@ def presets():
 def speak(req: SpeakReq):
     # Anything the request didn't set comes from the saved settings (or the repo's).
     # The language stays the request's own: saved settings never switch an agent's language.
-    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "check"))
+    saved = local_settings()  # read once: a save mid-request can't mix old and new
+    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "check"), saved)
     try:
         preset = voicefx.load_preset(opt["preset"])
     except FileNotFoundError as exc:
@@ -805,8 +846,7 @@ def speak(req: SpeakReq):
     if use_breeze:
         # With a voice to keep and no description, clone it as is: the preset's
         # description would steer the voice away from the kept one.
-        saved = local_settings().get("instruction")
-        default = "" if like else (saved or stock)
+        default = "" if like else (saved.get("instruction") or stock)
         instruction = (default if req.instruction is None else req.instruction).strip()
         use_default_voice = False
     else:
@@ -908,10 +948,14 @@ def save_settings(new: Settings):
             raise HTTPException(400, str(exc)) from exc
     # Only what differs from the repo's defaults is stored: if those change in an update,
     # anything the user never chose follows along.
-    data = {k: v for k, v in new.model_dump(exclude_unset=True).items() if v != REPO_DEFAULTS.get(k)}
-    if "seed" in new.model_fields_set and new.seed is None:
+    given = _keep(new.model_dump(exclude_unset=True))
+    data = {k: v for k, v in given.items() if v != REPO_DEFAULTS.get(k)}
+    if "seed" in given and given["seed"] is None:
         data["seed"] = None  # "random" is a real choice: keep it even though it isn't a number
-    SETTINGS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp = SETTINGS_FILE.with_name(SETTINGS_FILE.name + ".tmp")
+    with _lock:  # a reader never sees a half-written file
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, SETTINGS_FILE)
     return get_settings()
 
 
@@ -939,6 +983,21 @@ def delete_take(tid: str):
         for p in files:
             p.unlink(missing_ok=True)
     return {"id": tid, "deleted": len(files)}
+
+
+RENDER_FILE = re.compile(r"(?P<tid>[0-9]{8}-[0-9]{6}-[0-9a-f]{4})_fx-[A-Za-z0-9_.+-]+\.(wav|mp3|png)")
+
+
+@app.delete("/files/{name}")
+def delete_render(name: str):
+    """Remove one rendered file (an --fx preview), never a take's dry voice or its record."""
+    m = RENDER_FILE.fullmatch(name)
+    if not m or ".." in name:
+        raise HTTPException(400, f"only rendered files (<take>_fx-...) can be deleted, not {name!r}")
+    p = OUTPUT / name
+    existed = p.is_file()
+    p.unlink(missing_ok=True)
+    return {"name": name, "deleted": int(existed)}
 
 
 @app.get("/files/{name}")

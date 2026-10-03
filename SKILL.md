@@ -99,9 +99,9 @@ Always start it this way (not hidden in the background), and tell the user the w
 close. It loads the model in ~10 s, then **warms up its fast paths for ~35-50 s** before it answers. The
 `--wait` flag below covers that, so you can start it and generate right away with `--wait 180`.
 
-If the fast-path warmup fails (a Triton or driver problem), run the server directly with `--safe`:
-eager mode, about 6x slower but no compilation:
-`.venv\Scripts\python.exe server\app.py --safe`.
+If the fast-path warmup fails (a Triton or driver problem; the server's window shows the error and
+stays open for a minute), start it in eager mode instead, about 6x slower but with no compilation:
+`cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window --safe`.
 
 **If `.venv` or `models/` is missing,** the tool isn't installed. `install.ps1` downloads ~23 GB;
 ask the user before running it.
@@ -134,7 +134,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
 | `--instruction "..."` | The voice description. English: free text, default the preset's suggested one (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the default voice (the default, and the deep one); or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
 | `--seed N` | Reproduces a take exactly. Default: the default seed `74525861`; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
-| `--cfg X` | English only: how hard the model follows the instruction (default 6, the default style; Breeze recommends 4; 0.5-10, much above 6 can sound forced). |
+| `--cfg X` | English only: how hard the model follows the instruction (default 6, the default style; Breeze recommends 4; 0.5-10; much above 6 can sound forced). |
 | `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Below 0.75 it repeats words, so the server refuses it: use `--tempo` for slower. |
 | `--pitch N` | Semitones, -12..12, on the finished sound: negative is lower and bigger (tone and "throat" move together). -3 to -5 is a good start. |
 | `--tempo X` | Time-stretch, 0.5-1.5, same pitch: below 1 is slower. |
@@ -149,7 +149,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--wait S` | Wait up to S seconds for the server. |
 | `--json` | Only the server's JSON (plus `paths`): parse this rather than the text output. |
 | `--play` | Play the processed take on the user's speakers when it's ready; returns when playback ends. Exit 1 if it couldn't play. |
-| `--no-save` | Delete the whole take from `output/` when done (after `--play` and/or `--out`): for speech that's only meant to be heard. |
+| `--no-save` | Delete what this call made from `output/` when done (after `--play` and/or `--out`): the whole new take, or with `--fx` only that preview's files (the take is kept). For speech that's only meant to be heard. |
 
 **Presets.** "The Reaper voice" means the default, `reaper-drone`; offer the others as variations.
 
@@ -251,4 +251,5 @@ chain. The vocoder's knobs (`f0`, `follow`, `steps`, `chord`, `metal`, `sub`) ar
 `op_vocoder`; other ops are in `voicefx/fx.py` (`OPS`). Preset names must be letters, digits,
 `-` or `_`. Name experiments `_something.json`: git ignores them. Edit or add one, then re-run
 effects on existing takes with `--fx`: no restart needed, since presets are read on every request
-(changes to `fx.py` itself need a server restart). Run `.venv\Scripts\python.exe -m pytest tests -q` after changing `fx.py`.
+(changes to `fx.py` itself need a server restart). After changing code, run the tests:
+`cd ~/.claude/skills/local-voice && .venv/Scripts/python.exe -m pytest tests -q`.

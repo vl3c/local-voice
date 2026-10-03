@@ -150,3 +150,51 @@ def test_deleting_needs_a_valid_take_id(app):
     for bad in ("../x", "*", "20260101-120000-zzzz"):
         with pytest.raises(HTTPException):
             app.delete_take(bad)
+
+
+# ------------------------------------------------------------------ review fixes
+
+def test_cleared_number_fields_are_not_saved_as_empty(app):
+    app.save_settings(app.Settings(cfg_scale=None, tempo=None, pitch=-2, seed=None))
+    saved = app.local_settings()
+    assert saved == {"pitch": -2, "seed": None}           # nulls dropped, except seed = random
+    eff = app.effective_settings()
+    assert eff["cfg_scale"] == app.DEFAULT_CFG and eff["tempo"] == 1.0
+
+
+def test_settings_file_with_nulls_falls_back_per_key(app):
+    app.SETTINGS_FILE.write_text('{"tempo": null, "pitch": -3}', encoding="utf-8")
+    eff = app.effective_settings()
+    assert eff["tempo"] == 1.0 and eff["pitch"] == -3
+
+
+def test_render_deletion_never_touches_the_take(app):
+    from fastapi import HTTPException
+    tid = make_take(app, "20260101-120000-aaaa")
+    render = app.OUTPUT / f"{tid}_fx-reaper-drone_room.mp3"
+    render.write_bytes(b"x")
+    assert app.delete_render(render.name)["deleted"] == 1 and not render.exists()
+    for bad in (f"{tid}_dry.wav", f"{tid}.json", "../x_fx-a.wav", f"{tid}_fx-a.txt"):
+        with pytest.raises(HTTPException):
+            app.delete_render(bad)
+    assert app.take_paths(tid)["dry"].is_file()
+
+
+def test_cross_site_writes_are_refused(app):
+    from fastapi.testclient import TestClient
+    c = TestClient(app.app, base_url="http://127.0.0.1:8190")
+    evil = c.post("/api/default-voice/restore-previous", headers={"Origin": "https://evil.example"})
+    assert evil.status_code == 403
+    sneaky = c.post("/api/default-voice/restore-previous", headers={"Sec-Fetch-Site": "cross-site"})
+    assert sneaky.status_code == 403
+    page = c.post("/api/default-voice/restore-previous", headers={"Origin": "http://127.0.0.1:8190"})
+    assert page.status_code == 404                         # allowed through: there's simply no previous voice
+    cli = c.post("/api/default-voice/restore-previous")
+    assert cli.status_code == 404
+    assert c.get("/api/settings").headers["X-Frame-Options"] == "DENY"
+
+
+def test_take_ids_must_match_exactly(app):
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        app.load_take("20260101-120000-aaaa\n")

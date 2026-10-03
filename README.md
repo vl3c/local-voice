@@ -211,7 +211,7 @@ python scripts\say.py --presets
 | `--wait S` | Wait up to S seconds for the server (startup takes ~60 s). |
 | `--json` | Print only the server's JSON response, plus `paths` (the delivered files). |
 | `--play` | Play the processed take on this machine's speakers; returns when playback ends (exit 1 if it couldn't play). |
-| `--no-save` | Delete the whole take from `output\` when done (after `--play` and/or `--out`): speech meant only to be heard. The `speak` skill uses it. |
+| `--no-save` | Delete what this call made from `output\` when done (after `--play` and/or `--out`): the new take, or with `--fx` only that preview's files. For speech meant only to be heard; the `speak` skill uses it. |
 
 Exit codes: 0 done, 1 no server / lost the server / server error, 2 bad arguments.
 
@@ -237,6 +237,7 @@ in `config.local.json`; neither lives in `output\`. All three are gitignored.
 | `POST /api/default-voice/restore-previous` | | swap back to the previous default voice |
 | `GET` / `POST` / `DELETE /api/settings` | the settings to save | `effective`, `saved`, `repo` defaults; save / reset `config.local.json` |
 | `DELETE /api/takes/<id>` | | delete every file of one take (what `--no-save` does) |
+| `DELETE /files/<take>_fx-...` | | delete one rendered file (what `--fx --no-save` does); a take's dry voice and record can't be deleted this way |
 | `GET /files/<name>` | | a WAV, MP3 or PNG from `output/` |
 
 `instruction` omitted means: English, the preset's suggested description; Romanian, clone the
@@ -279,8 +280,8 @@ explanation. `Ctrl+Enter` speaks.
 | Effects | ~0.2x real time |
 | Whisper check | ~1 s |
 
-Without the fast paths (`.venv\Scripts\python.exe server\app.py --safe`) generation is about
-2.5x *slower* than real time.
+Without the fast paths (`start.cmd --window --safe`) generation is about 2.5x *slower* than real
+time.
 
 ## Notes and gotchas
 

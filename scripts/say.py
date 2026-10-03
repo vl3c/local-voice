@@ -129,14 +129,14 @@ def main() -> int:
                     "none; with --like, default is a pure clone). Romanian: attributes; default clones the default voice")
     ap.add_argument("--preset", help="effects preset (default: reaper-drone)")
     ap.add_argument("--lang", default="en", choices=["en", "ro"], help="en (default): Breeze TTS 2; ro: OmniVoice")
-    ap.add_argument("--speed", type=float, help="Romanian only: the model's speaking rate, 0.75-1.3, default 0.85 "
+    ap.add_argument("--speed", type=float, help="Romanian only: the model's speaking rate, 0.75-1.3, default 0.9 "
                     "(for slower than that, use --tempo)")
-    ap.add_argument("--pitch", type=float, default=0.0, help="semitones, -12..12, applied with the effects "
+    ap.add_argument("--pitch", type=float, help="semitones, -12..12, applied with the effects "
                     "(e.g. -3 for a lower, bigger voice); works with --fx too")
     ap.add_argument("--reverb", choices=["none", "room", "hall", "cathedral"],
                     help="space added last: none, room (light; the default), hall (medium), cathedral (heavy); "
                     "works with --fx too")
-    ap.add_argument("--tempo", type=float, default=1.0, help="time-stretch, 0.5-1.5, applied with the effects "
+    ap.add_argument("--tempo", type=float, help="time-stretch, 0.5-1.5, applied with the effects "
                     "(0.85 = slower, same pitch); works with --fx too")
     ap.add_argument("--seed", help="a number to reproduce a take; 'random' for a new voice "
                     "(default: 74525861)")
@@ -241,24 +241,41 @@ def main() -> int:
             print(f"WARNING: {w}")
         for p in paths:
             print(p)
-    if args.play:
-        wet = res.get("files", {}).get("wet")
-        if not wet:
-            print("nothing to play", file=sys.stderr)
-            return 1
-        try:
-            sys.stdout.flush()
-            play(OUTPUT / wet)
-        except Exception as exc:  # the take exists; only the playback failed
-            print(f"could not play {wet}: {exc}", file=sys.stderr)
-            return 1
-        if not args.json:
-            print(f"played {wet}")
-    if args.no_save and res.get("id"):
+    status = 0
+    try:
+        if args.play:
+            wet = res.get("files", {}).get("wet")
+            if not wet:
+                print("nothing to play", file=sys.stderr)
+                status = 1
+            else:
+                try:
+                    sys.stdout.flush()
+                    play(OUTPUT / wet)
+                    if not args.json:
+                        print(f"played {wet}")
+                except Exception as exc:  # the take exists; only the playback failed
+                    print(f"could not play {wet}: {exc}", file=sys.stderr)
+                    status = 1
+    finally:
+        if args.no_save and res.get("id"):
+            forget(res, fx_only=bool(args.fx), quiet=args.json)
+    return status
+
+
+def forget(res: dict, fx_only: bool, quiet: bool) -> None:
+    """--no-save: delete what this call made. For a new take that's the whole take; for
+    --fx only the files it rendered, never the take being previewed."""
+    if fx_only:
+        names = [n for k, n in res.get("files", {}).items() if k != "dry"]
+        for n in names:
+            call(f"/files/{n}", method="DELETE")
+        msg = f"not saved: removed this preview's {len(names)} file(s); take {res['id']} is kept"
+    else:
         gone = call(f"/api/takes/{res['id']}", method="DELETE")
-        if not args.json:
-            print(f"not saved: removed {gone['deleted']} file(s) of take {res['id']}")
-    return 0
+        msg = f"not saved: removed {gone['deleted']} file(s) of take {res['id']}"
+    if not quiet:
+        print(msg)
 
 
 if __name__ == "__main__":

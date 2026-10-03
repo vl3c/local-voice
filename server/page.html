@@ -284,19 +284,23 @@ function collectSettings() {
   const seed = $("seed").value.trim();
   const desc = $("instruction").value.trim();
   const custom = !isRo() && desc && !stockDescriptions().includes(desc);
-  return {
+  const c = {
     language: $("lang").value, preset: $("preset").value, seed: seed ? parseInt(seed, 10) : null,
     cfg_scale: parseFloat($("cfg").value), speed: parseFloat($("speed").value),
     pitch: parseFloat($("pitch").value), tempo: parseFloat($("tempo").value),
     reverb: $("reverb").value, check: $("check").checked, instruction: custom ? desc : null,
   };
+  // A cleared number field is left out (it keeps the default), never saved as empty.
+  for (const k of ["cfg_scale", "speed", "pitch", "tempo"]) if (!Number.isFinite(c[k])) delete c[k];
+  if (seed && !Number.isFinite(c.seed)) c.seed = null;
+  return c;
 }
 
 function describeSettings(c) {
   const names = {room: "light (large room)", hall: "medium (hall)", cathedral: "heavy (cathedral)", none: "none"};
   return [`Language: ${c.language === "ro" ? "Romanian" : "English"}`, `Preset: ${c.preset}`,
-    `Seed: ${c.seed === null ? "random each time" : c.seed}`, `Strength: ${c.cfg_scale}`, `Speed (Romanian): ${c.speed}`,
-    `Pitch: ${c.pitch}`, `Tempo: ${c.tempo}`, `Reverb: ${names[c.reverb] || c.reverb}`,
+    `Seed: ${c.seed === null ? "random each time" : c.seed}`, `Strength: ${c.cfg_scale ?? "default"}`, `Speed (Romanian): ${c.speed ?? "default"}`,
+    `Pitch: ${c.pitch ?? "default"}`, `Tempo: ${c.tempo ?? "default"}`, `Reverb: ${names[c.reverb] || c.reverb}`,
     `Transcribe + spectrogram: ${c.check ? "on" : "off"}`,
     `Voice description: ${c.instruction ? "your own (\"" + c.instruction.slice(0, 60) + (c.instruction.length > 60 ? "…" : "") + "\")" : "the preset's"}`].join("\n");
 }
