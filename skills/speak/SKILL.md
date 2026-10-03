@@ -52,8 +52,8 @@ skill's own folder with `..`: the skills are links, and `..` resolves to the wro
    In PowerShell instead: `& "$env:USERPROFILE\.claude\skills\local-voice\start.cmd" --window`.
    Tell the user in chat that the voice is warming up (about a minute the first time) and that
    closing that window stops it. Step 3's `--wait 180` waits for it to be ready. If it still
-   isn't up after that, the server's window shows why (it stays open for a minute after a crash):
-   ask the user what it says rather than retrying blindly.
+   isn't up after that, read the end of its log, `~/.claude/skills/local-voice/logs/server.log`,
+   and tell the user what went wrong rather than retrying blindly.
    If `~/.claude/skills/local-voice` doesn't exist, or its `.venv` or `models` folder is missing,
    the tool isn't installed: tell the user, and don't run its ~23 GB installer without their
    go-ahead.

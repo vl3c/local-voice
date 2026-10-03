@@ -44,6 +44,7 @@ PID_FILE = OUTPUT / ".server.pid"
 # Kept apart from output/ (which is safe to clear): the default voice's recording, and
 # the user's saved settings. Both are local only - gitignored, never committed.
 VOICES = REPO / "voices"
+LOGS = REPO / "logs"  # server.log (+ server.previous.log): the full output, gitignored
 SETTINGS_FILE = REPO / "config.local.json"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(ENGINE))
@@ -65,6 +66,7 @@ from typing import Literal  # noqa: E402
 from pydantic import BaseModel, Field, field_validator  # noqa: E402
 from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 
+import serverlog  # noqa: E402  (server/, on sys.path as the script's folder)
 import voicefx  # noqa: E402
 from textnorm import normalise  # noqa: E402  (server/, on sys.path as the script's folder)
 
@@ -216,7 +218,7 @@ class _Whisper:
         from transformers import pipeline
         t0 = time.time()
         self.pipe = pipeline("automatic-speech-recognition", model=str(MODELS / "whisper-large-v3-turbo"),
-                             torch_dtype=torch.float16, device="cuda:0")
+                             dtype=torch.float16, device="cuda:0")
         print(f"[local-voice] Whisper loaded in {time.time() - t0:.1f}s", flush=True)
 
     def __call__(self, audio: np.ndarray, sr: int, expected_words: int = 60, language: str = "en") -> str:
@@ -249,13 +251,16 @@ class _Omni:
         if not self.PY.is_file() or not (MODELS / "omnivoice" / "model.safetensors").is_file():
             raise HTTPException(503, "the Romanian engine (OmniVoice) isn't installed; re-run install.ps1")
         t0 = time.time()
-        # stderr is inherited, so the worker's logs land in the server console.
+        # The worker's stderr (its logs, progress bars) goes through this process's log
+        # and console filter, like everything else the server prints.
         self.proc = subprocess.Popen([str(self.PY), str(Path(__file__).parent / "omni_worker.py")],
-                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     text=True, encoding="utf-8", bufsize=1)
-        # A reader thread, so a hung worker times out instead of holding _lock forever.
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, encoding="utf-8", errors="replace", bufsize=1)
+        # Reader threads, so a hung worker times out instead of holding _lock forever,
+        # and its stderr pipe never fills up and blocks it.
         self._lines: queue.Queue[str] = queue.Queue()
         threading.Thread(target=self._pump, daemon=True).start()
+        threading.Thread(target=self._pump_err, daemon=True).start()
         try:
             hello = self._read(self.START_TIMEOUT)
             if not hello.get("ready"):
@@ -270,6 +275,10 @@ class _Omni:
         for line in self.proc.stdout:
             self._lines.put(line)
         self._lines.put("")  # EOF
+
+    def _pump_err(self) -> None:
+        for line in self.proc.stderr:
+            sys.stderr.write(line)
 
     def _read(self, timeout: float) -> dict:
         try:
@@ -888,6 +897,7 @@ def speak(req: SpeakReq):
         except HTTPException:
             raise
         except Exception as exc:  # surface model errors to the client instead of a bare 500
+            print(f"[local-voice] {time.strftime('%H:%M:%S')} generation FAILED: {type(exc).__name__}: {exc}", flush=True)
             raise HTTPException(500, f"generation failed: {type(exc).__name__}: {exc}") from exc
         gen_s = time.time() - t0
 
@@ -905,6 +915,9 @@ def speak(req: SpeakReq):
                                 "missing. Split it into shorter takes (use --like to keep the voice).")
         take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
         res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
+    heard = f", {res['match']['wet']:.0%} of words heard" if "match" in res else ""
+    print(f"[local-voice] {time.strftime('%H:%M:%S')} {req.language} take {tid}: {res['duration_s']}s of audio "
+          f"in {gen_s:.1f}s, {opt['preset']}{heard}{' - WARNING' if meta.get('warnings') else ''}", flush=True)
     return {**meta, **res, "gen_s": round(gen_s, 2)}
 
 
@@ -970,7 +983,9 @@ def refx(req: FxReq):
     meta = load_take(req.id)
     opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "check"))
     with _lock:
-        return {**meta, **render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])}
+        res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
+    print(f"[local-voice] {time.strftime('%H:%M:%S')} effects on take {req.id}: {opt['preset']}", flush=True)
+    return {**meta, **res}
 
 
 @app.delete("/api/takes/{tid}")
@@ -1039,6 +1054,8 @@ def main() -> None:
             probe.bind(("127.0.0.1", args.port))
         except OSError:
             sys.exit(f"127.0.0.1:{args.port} is in use: is local-voice already running? (stop.cmd stops it)")
+    log_path = serverlog.install(LOGS)
+    print(f"[local-voice] full log: {log_path}", flush=True)
     # stop.cmd stops exactly this process tree (and the Romanian worker under it)
     # by PID, whatever path - real folder or skills junction - started it.
     OUTPUT.mkdir(exist_ok=True)

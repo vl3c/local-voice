@@ -99,8 +99,9 @@ Always start it this way (not hidden in the background), and tell the user the w
 close. It loads the model in ~10 s, then **warms up its fast paths for ~35-50 s** before it answers. The
 `--wait` flag below covers that, so you can start it and generate right away with `--wait 180`.
 
-If the fast-path warmup fails (a Triton or driver problem; the server's window shows the error and
-stays open for a minute), start it in eager mode instead, about 6x slower but with no compilation:
+**If the server doesn't come up,** read its log: `~/.claude/skills/local-voice/logs/server.log`
+(the previous run is `server.previous.log`). The window shows only milestones and errors; the log
+has everything, timestamped. If the fast-path warmup fails (a Triton or driver problem), start it in eager mode instead, about 6x slower but with no compilation:
 `cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window --safe`.
 
 **If `.venv` or `models/` is missing,** the tool isn't installed. `install.ps1` downloads ~23 GB;

@@ -221,9 +221,13 @@ settings override the built-in ones for the page and for every API/CLI request t
 setting out (the language is never switched for an agent). `say.py --settings` shows what's in
 effect and where each value comes from.
 
-**What's safe to delete.** `output\` holds takes only: clear it any time. The default voice is a
+**The server's log.** The window shows milestones, one line per take and any errors; the
+full output (warmup steps, library notices) goes to `logs\server.log`, timestamped. Each start
+keeps the previous run as `logs\server.previous.log`, so a crash's details survive a restart.
+
+**What's safe to delete.** `output\` holds takes only: clear it any time. `logs\` too. The default voice is a
 copy of its recording in `voices\` (with the previous one, for Undo), and your saved settings are
-in `config.local.json`; neither lives in `output\`. All three are gitignored.
+in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 ### HTTP API (127.0.0.1:8190)
 
@@ -332,5 +336,5 @@ scripts/download_models.py           resumable, verifying downloader
 scripts/check_repo_safe.py           pre-publish scan: no weights, audio, local paths or secrets
 tests/                               effects and text tests (pytest)
 SKILL.md, skills/speak/SKILL.md      Claude Code skills: make audio / talk out loud
-engine/, models/, .venv*/, output/  created at install / run time, gitignored
+engine/, models/, .venv*/, output/, logs/, voices/   created at install / run time, gitignored
 ```
