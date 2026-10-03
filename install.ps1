@@ -161,12 +161,14 @@ if ($torchProbe.Code -eq 0) {
 }
 
 # Last line only: the very first CUDA initialisation can print a warning ahead of the answer.
-$cuda = Probe $venvPy @('-c', 'import torch;print(torch.cuda.is_available())')
+# -W ignore: on a fresh venv NumPy isn't installed yet, and torch warns about it on stderr.
+$cuda = Probe $venvPy @('-W', 'ignore', '-c', 'import torch;print(torch.cuda.is_available())')
 if ((($cuda.Out -split "`r?`n") | Select-Object -Last 1).Trim() -ne 'True') {
     Note $cuda.Out
     Note 'torch cannot see CUDA. Delete .venv and re-run with a different -CudaIndex.'
 } else {
-    Ok "CUDA available, $((Probe $venvPy @('-c', 'import torch;print(torch.cuda.get_device_name(0))')).Out)"
+    $gpu = ((Probe $venvPy @('-W', 'ignore', '-c', 'import torch;print(torch.cuda.get_device_name(0))')).Out -split "`r?`n") | Select-Object -Last 1
+    Ok "CUDA available, $gpu"
 }
 
 Step 'Dependencies'
@@ -204,9 +206,11 @@ if ((Probe $roPy @('-c', 'import torch')).Code -ne 0) {
 # --no-deps: OmniVoice's metadata pins an older torch that would replace the CUDA build.
 & $roPy -m pip install --quiet @pipFlags --no-deps $OMNI_PKG
 if ($LASTEXITCODE -ne 0) { Fail 'OmniVoice install failed' }
-& $roPy -m pip install --quiet @pipFlags -r (Join-Path $RepoRoot 'requirements-ro.txt')
+# --no-warn-conflicts: OmniVoice lists gradio, tensorboardX and webdataset, which inference
+# doesn't need; pip would otherwise print a scary but harmless 'ERROR' about them.
+& $roPy -m pip install --quiet --no-warn-conflicts @pipFlags -r (Join-Path $RepoRoot 'requirements-ro.txt')
 if ($LASTEXITCODE -ne 0) { Fail 'Romanian engine dependency install failed' }
-$omniProbe = Probe $roPy @('-c', 'import torch, omnivoice; print(torch.__version__)')
+$omniProbe = Probe $roPy @('-W', 'ignore', '-c', 'import torch, omnivoice; print(torch.__version__)')
 $omniLast = (($omniProbe.Out -split "`r?`n") | Select-Object -Last 1).Trim()
 if ($omniProbe.Code -ne 0 -or $omniLast -notmatch '\+cu') {
     Note $omniProbe.Out
