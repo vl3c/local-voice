@@ -7,7 +7,7 @@ description: Generate speech locally in English (Breeze TTS 2 voice design: desc
 
 The model makes a **human** voice: Breeze TTS 2 (English) from a written description like
 "ancient male, massive scale, deep resonant bass, subterranean, slow and cold"; OmniVoice
-(Romanian) by cloning the "house voice" (a deep English take) by default, or from attributes like
+(Romanian) by cloning the "default voice" (a deep English take) by default, or from attributes like
 "male, elderly, very low pitch". No open model makes a truly
 non-human voice by itself, so the presets replace the voice with a machine: a vocoder lays its
 articulation over a synthetic brass tone at a fixed low pitch, then distortion, metal resonance
@@ -23,7 +23,7 @@ only judge of how it *sounds*: send them the files early and let them steer.
 "Make the Reaper say: *Your extinction is not a tragedy. It is a correction.*"
 
 1. **Check** the GPU and the server (step 1). Start the server if needed.
-2. **Draft:** start with the house defaults (just the text); for alternatives, add
+2. **Draft:** start with the defaults (just the text); for alternatives, add
    `--seed random` for 2-3 takes (step 2).
 3. **Read** the transcripts: wet below ~85% of words means the effects are burying the speech.
    Open the spectrogram PNG with Read if something looks odd.
@@ -102,24 +102,25 @@ python "<base dir>/scripts/say.py" "<text>" --format mp3 --out <dir>     # for W
 python "<base dir>/scripts/say.py" --presets
 ```
 
-**House defaults.** With nothing but the text, you get the house voice: the `harbinger` preset,
-seed `74525860` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
+**Defaults.** With nothing but the text, you get the default voice: the `reaper-drone` preset at
+strength 6, seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
 tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
 per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
 take, `--no-check` (API: `"check": false`) to skip the check.
 
 | Flag | Meaning |
 |---|---|
-| `--preset NAME` | Effects preset (default `harbinger`). `--presets` lists them. See the table below. |
+| `--preset NAME` | Effects preset (default `reaper-drone`). `--presets` lists them. See the table below. |
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
-| `--instruction "..."` | The voice description. English: free text, default the preset's suggested one (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the house voice (the default, and the deep one); or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
-| `--seed N` | Reproduces a take exactly. Default: the house seed `74525860`; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
-| `--cfg X` | English only: how hard the model follows the instruction (default 4, Breeze's recommendation; 0.5-10, above ~5-6 tends to sound forced). |
+| `--instruction "..."` | The voice description. English: free text, default the preset's suggested one (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the default voice (the default, and the deep one); or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
+| `--seed N` | Reproduces a take exactly. Default: the default seed `74525861`; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
+| `--cfg X` | English only: how hard the model follows the instruction (default 6, the default style; Breeze recommends 4; 0.5-10, much above 6 can sound forced). |
 | `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Below 0.75 it repeats words, so the server refuses it: use `--tempo` for slower. |
 | `--pitch N` | Semitones, -12..12, on the finished sound: negative is lower and bigger (tone and "throat" move together). -3 to -5 is a good start. |
 | `--tempo X` | Time-stretch, 0.5-1.5, same pitch: below 1 is slower. |
 | `--reverb KIND` | `none` (dry: for a take that will get its own room in a mix), `room` (default), `hall`, `cathedral`. |
-| `--house-voice [TAKE]` | Show the house voice, or set it to TAKE. |
+| `--default-voice [TAKE]` | Show the default voice, set it to TAKE (only when the user asks), or `previous` to undo. |
+| `--settings` | Show the defaults in effect: the user may have saved their own (`config.local.json`), which every request without that option uses. Check it before assuming the built-in defaults. |
 | `--like TAKE` | Keep an earlier take's voice for a new line: use it for multi-line scenes so every line sounds like the same Reaper. Works across languages: Romanian lines can clone an English take's voice (and the reverse). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
 | `--check` / `--no-check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. **On by default**; `--no-check` saves ~1 s when you don't need it. |
@@ -132,11 +133,15 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 
 | Preset | Use it for |
 |---|---|
-| `reaper-drone` | one unmoving brass pitch, the words shape a drone |
+| `sovereign` | matched to a reference clip's measured pitches (by ear, `reaper-drone` came out closer): a clear deep voice over a buzzing octave-down hum (C1) that rings after phrases |
+| `reaper-drone` | the default, and the most electronic: one unmoving brass pitch, the words shape a drone; judged the closest to the game's Reapers by ear |
 | `reaper` | the same machine, loosely following the voice's intonation |
-| `harbinger` | the default: a synth chord snapping to semitones, ring-mod shimmer, heavy distortion |
+| `harbinger` | a synth chord snapping to semitones, ring-mod shimmer, heavy distortion |
 | `demon` | organic and monstrous rather than mechanical: a demon more than a machine |
 | `dry` | the base voice, no effects |
+
+**Loudness:** every processed take is normalised to -16 LUFS (peaks under -1 dBFS), so presets
+and settings can be compared, and clips cut together, without volume jumps.
 
 **Takes:** every generation is a *take* with an id like `20260101-120000-ab12`. Its files live in
 `output/`: `<id>_dry.wav` (24 kHz, the voice as generated), `<id>_fx-<preset>[_pitch-4][_tempo0.85][_hall].wav`
@@ -156,11 +161,11 @@ lines with `--like`.
 
 ## Romanian
 
-- **Romanian clones the house voice by default** (no `--instruction`, no `--like`): a deep
+- **Romanian clones the default voice by default** (no `--instruction`, no `--like`): a deep
   English Breeze take (~65 Hz), made automatically on the first Romanian line (~30 s once) and
-  stored in `output/house_voice.json`. Why: OmniVoice's own "very low pitch" lands around
-  100-130 Hz, which sounds too small next to the English takes. `--house-voice`
-  shows it; `--house-voice <take>` sets it (pick a deep English take). Only design Romanian
+  stored as a copy in `voices/` (safe from clearing `output/`). Why: OmniVoice's own "very low pitch" lands around
+  100-130 Hz, which sounds too small next to the English takes. `--default-voice`
+  shows it; `--default-voice <take>` sets it (pick a deep English take). Only design Romanian
   voices from attributes if the user wants a different voice, and say it will sound higher.
 - **Whisper can't hear an accent.** A cloned English voice might carry English colouring into
   Romanian; tell the user to listen for it, and offer attribute-designed Romanian as the alternative.
@@ -174,7 +179,7 @@ lines with `--like`.
   abbreviations aren't expanded, so write them out. Stress errors don't show in transcripts either: if the user reports a wrong
   stress, rephrase or try another seed.
 - The Romanian engine starts on the first Romanian request (~20 s, plus ~10 s once to make the
-  house voice), then ~1-1.5 s a sentence.
+  default voice), then ~1-1.5 s a sentence.
 
 ## 3. Write the voice description
 

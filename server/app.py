@@ -22,6 +22,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import socket
 import sys
 import threading
@@ -36,6 +37,10 @@ ENGINE = REPO / "engine" / "breeze-tts"
 MODELS = REPO / "models"
 OUTPUT = REPO / "output"
 PID_FILE = OUTPUT / ".server.pid"
+# Kept apart from output/ (which is safe to clear): the default voice's recording, and
+# the user's saved settings. Both are local only - gitignored, never committed.
+VOICES = REPO / "voices"
+SETTINGS_FILE = REPO / "config.local.json"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(ENGINE))
 # The depth-decoder fast path compiles with Inductor, whose static CUDA launcher
@@ -59,7 +64,10 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 import voicefx  # noqa: E402
 from textnorm import normalise  # noqa: E402  (server/, on sys.path as the script's folder)
 
-DEFAULT_CFG = 4.0  # Breeze's recommendation for following an instruction
+# Instruction strength. Breeze recommends 4; the default style uses 6, which pushes the
+# voice harder towards its description (deeper, colder, more machine-like).
+DEFAULT_CFG = 6.0
+VOICE_CFG = 4.0  # the auto-made default voice keeps the strength it was measured at (~65 Hz)
 MAX_TEXT = 800  # characters; a take longer than ~120 s is cut off by the model (see MAX_TAKE_S)
 BREEZE_MAX_TOKENS = 1500
 MAX_TAKE_S = BREEZE_MAX_TOKENS / 12.5  # Breeze emits 12.5 audio frames a second: a 120 s ceiling
@@ -464,23 +472,23 @@ def _release_cache() -> None:
 BREEZE_LANGS = {"en"}  # Breeze TTS 2; "ro" goes to OmniVoice
 OMNI_DEFAULT_SPEED = 0.9
 
-# The house style, so a request with just {"text": ...} gives a good voice: the
-# Harbinger machine at a seed whose voice was picked by ear, with a light room.
-DEFAULT_PRESET = "harbinger"
-DEFAULT_SEED = 74525860
+# The default style, so a request with just {"text": ...} gives a good voice: the
+# reaper-drone machine at strength 6 and a seed whose voice was picked by ear, with a light room.
+DEFAULT_PRESET = "reaper-drone"
+DEFAULT_SEED = 74525861
 DEFAULT_REVERB = "room"
 
 
-# The house voice: the take Romanian lines clone by default. OmniVoice's own deepest
+# The default voice: the take Romanian lines clone unless told otherwise. OmniVoice's own deepest
 # design ("very low pitch") sits around 100-125 Hz and sounds small under the Reaper
 # presets; Breeze's lands near 65 Hz. Cloning a Breeze take carries that depth over.
-HOUSE_FILE = OUTPUT / "house_voice.json"
-HOUSE_TEXT = "You exist because we allow it. You will end because we demand it."
-HOUSE_INSTRUCTION = ("Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly "
+OLD_VOICE_FILES = (OUTPUT / "default_voice.json", OUTPUT / "house_voice.json")  # where it lived before voices/
+VOICE_TEXT = "You exist because we allow it. You will end because we demand it."
+VOICE_INSTRUCTION = ("Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly "
                      "and calmly with cold, absolute authority and no emotion, every word measured and final, "
                      "long pauses between phrases.")
-HOUSE_SEEDS = (12, 7, 21, 33, 5)  # tried in order until one lands deep enough
-HOUSE_MAX_F0 = 75.0
+VOICE_SEEDS = (12, 7, 21, 33, 5)  # tried in order until one lands deep enough
+VOICE_MAX_F0 = 75.0
 
 
 def median_f0(path: Path) -> float:
@@ -491,52 +499,123 @@ def median_f0(path: Path) -> float:
     return round(float(np.median(f)), 1) if len(f) else 0.0
 
 
-def current_house_voice() -> str | None:
+def _slot(name: str) -> tuple[Path, Path]:
+    """voices/<name>.wav and .json: a stored copy of a voice's recording and its transcript."""
+    return VOICES / f"{name}.wav", VOICES / f"{name}.json"
+
+
+def _read_slot(name: str) -> dict:
+    wav, meta = _slot(name)
     try:
-        tid = json.loads(HOUSE_FILE.read_text(encoding="utf-8"))["id"]
-    except (OSError, ValueError, KeyError):
-        return None
-    return tid if TAKE_ID.match(tid) and take_paths(tid)["dry"].is_file() else None
+        info = json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return info if wav.is_file() and info.get("text") else {}
 
 
-def set_house_voice(tid: str) -> dict:
-    load_take(tid)
-    info = {"id": tid, "f0_hz": median_f0(take_paths(tid)["dry"])}
-    OUTPUT.mkdir(exist_ok=True)
-    HOUSE_FILE.write_text(json.dumps(info, indent=2), encoding="utf-8")
+def _migrate_old_default_voice() -> None:
+    """Earlier versions kept only a pointer in output/: copy that take into voices/ while it still exists."""
+    if _read_slot("default"):
+        return
+    for old in OLD_VOICE_FILES:
+        try:
+            tid = json.loads(old.read_text(encoding="utf-8")).get("id", "")
+        except (OSError, ValueError):
+            continue
+        if TAKE_ID.match(tid) and take_paths(tid)["dry"].is_file() and take_paths(tid)["meta"].is_file():
+            _store("default", tid)
+            for o in OLD_VOICE_FILES:
+                o.unlink(missing_ok=True)
+            return
+
+
+def _store(name: str, tid: str) -> dict:
+    meta = load_take(tid)
+    VOICES.mkdir(exist_ok=True)
+    wav, js = _slot(name)
+    shutil.copyfile(take_paths(tid)["dry"], wav)
+    info = {"id": tid, "text": meta["text"], "language": meta.get("language", "en"), "f0_hz": median_f0(wav)}
+    js.write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
     return info
 
 
-def house_voice() -> str:
-    """The house voice's take id, generating one with Breeze if there is none. Call with _lock held."""
-    tid = current_house_voice()
-    if tid:
-        return tid
-    engine = tts()
-    best = None  # (take id, f0); an unvoiced take (f0 0) never wins
-    try:
-        for seed in HOUSE_SEEDS:
-            best = _house_candidate(engine, seed, best)
-            if best and 0 < best[1] <= HOUSE_MAX_F0:
-                break
-    except Exception:
-        if best:
-            for p in take_paths(best[0]).values():
-                p.unlink(missing_ok=True)
-        raise
-    if best is None:
-        raise RuntimeError("no house-voice candidate had a measurable pitch")
-    return set_house_voice(best[0])["id"]
+def default_voice_info() -> dict:
+    """The default voice ({"id", "text", "f0_hz", "previous"}), or {} if there is none yet.
+
+    It lives in voices/ as a copy of the take's recording, so clearing output/ never
+    loses it. "id" is the take it was copied from, which may since have been deleted.
+    """
+    _migrate_old_default_voice()
+    info = _read_slot("default")
+    if info:
+        prev = _read_slot("previous")
+        info["previous"] = {"id": prev["id"], "f0_hz": prev.get("f0_hz")} if prev else None
+    return info
 
 
-def _house_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple[str, float] | None:
+def current_default_voice() -> str | None:
+    return default_voice_info().get("id")
+
+
+def set_default_voice(tid: str) -> dict:
+    """Make take `tid` the default voice; the one it replaces moves to voices/previous.*."""
+    load_take(tid)
+    cur = _read_slot("default")
+    if cur and cur.get("id") != tid:
+        for a, b in zip(_slot("default"), _slot("previous")):
+            a.replace(b)
+    _store("default", tid)
+    return default_voice_info()
+
+
+def restore_previous_voice() -> dict:
+    """Swap the default voice with the previous one (an undo that survives a cleared output/)."""
+    if not _read_slot("previous"):
+        raise HTTPException(404, "there is no previous default voice to go back to")
+    tmp = [p.with_suffix(p.suffix + ".swap") for p in _slot("default")]
+    for a, t in zip(_slot("default"), tmp):
+        a.replace(t)
+    for b, a in zip(_slot("previous"), _slot("default")):
+        b.replace(a)
+    for t, b in zip(tmp, _slot("previous")):
+        t.replace(b)
+    return default_voice_info()
+
+
+def default_voice_ref() -> tuple[Path, str, str]:
+    """(recording, its transcript, source take id) of the default voice, making one if needed.
+
+    Call with _lock held. With no default voice yet, Breeze makes a few candidates and
+    the deepest (under 75 Hz, ~65 Hz typical) becomes it.
+    """
+    info = default_voice_info()
+    if not info:
+        engine = tts()
+        best = None  # (take id, f0); an unvoiced take (f0 0) never wins
+        try:
+            for seed in VOICE_SEEDS:
+                best = _voice_candidate(engine, seed, best)
+                if best and 0 < best[1] <= VOICE_MAX_F0:
+                    break
+        except Exception:
+            if best:
+                for p in take_paths(best[0]).values():
+                    p.unlink(missing_ok=True)
+            raise
+        if best is None:
+            raise RuntimeError("no default-voice candidate had a measurable pitch")
+        info = set_default_voice(best[0])
+    return _slot("default")[0], info["text"], info["id"]
+
+
+def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple[str, float] | None:
     """Make one candidate; return whichever of it and `best` is deeper, deleting the other."""
     cand = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
     try:
-        dry, _ = engine.synth(HOUSE_TEXT, HOUSE_INSTRUCTION, seed, DEFAULT_CFG)
+        dry, _ = engine.synth(VOICE_TEXT, VOICE_INSTRUCTION, seed, VOICE_CFG)
         sf.write(take_paths(cand)["dry"], dry, engine.sample_rate, subtype="PCM_16")
-        meta = {"id": cand, "text": HOUSE_TEXT, "language": "en", "instruction": HOUSE_INSTRUCTION, "seed": seed,
-                "cfg_scale": DEFAULT_CFG, "like": None, "model": "breeze-tts-2", "made_for": "house voice",
+        meta = {"id": cand, "text": VOICE_TEXT, "language": "en", "instruction": VOICE_INSTRUCTION, "seed": seed,
+                "cfg_scale": VOICE_CFG, "like": None, "model": "breeze-tts-2", "made_for": "default voice",
                 "dry_duration_s": round(len(dry) / engine.sample_rate, 2)}
         take_paths(cand)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
         f0 = median_f0(take_paths(cand)["dry"])
@@ -544,7 +623,7 @@ def _house_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
         for p in take_paths(cand).values():
             p.unlink(missing_ok=True)
         raise
-    print(f"[local-voice] house voice candidate {cand} (seed {seed}): {f0} Hz", flush=True)
+    print(f"[local-voice] default voice candidate {cand} (seed {seed}): {f0} Hz", flush=True)
     loser = None
     if f0 > 0 and (best is None or f0 < best[1]):
         loser, best = (best[0] if best else None), (cand, f0)
@@ -556,12 +635,57 @@ def _house_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
     return best
 
 
+# Saved settings: what the page starts with, and what a request gets for anything it
+# doesn't specify. The repo's built-in defaults below are the base; the user's own,
+# saved from the page, live in config.local.json (gitignored) and override them.
+REPO_DEFAULTS = {"language": "en", "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED, "cfg_scale": DEFAULT_CFG,
+                 "speed": OMNI_DEFAULT_SPEED, "pitch": 0.0, "tempo": 1.0, "reverb": DEFAULT_REVERB,
+                 "check": True, "instruction": None}
+
+
+class Settings(BaseModel):
+    """What can be saved. Omitted keys fall back to the repo defaults; seed null = random."""
+    model_config = {"extra": "forbid"}
+    language: str | None = Field(None, pattern=r"^(en|ro)$")
+    preset: str | None = None
+    seed: int | None = Field(None, ge=0, lt=2**32)
+    cfg_scale: float | None = Field(None, gt=0, le=10)
+    speed: float | None = Field(None, ge=0.75, le=1.3)
+    pitch: float | None = Field(None, ge=-12, le=12)
+    tempo: float | None = Field(None, ge=0.5, le=1.5)
+    reverb: Reverb | None = None
+    check: bool | None = None
+    instruction: str | None = Field(None, max_length=2000)  # English voice description; null = the preset's
+
+
+def local_settings() -> dict:
+    """The user's saved settings, validated; {} if none (or the file is unreadable)."""
+    try:
+        raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return Settings(**raw).model_dump(exclude_unset=True)
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:  # a hand-edited file with a typo: say so, use the repo defaults
+        print(f"[local-voice] ignoring {SETTINGS_FILE.name}: {exc}", flush=True)
+        return {}
+
+
+def effective_settings() -> dict:
+    return {**REPO_DEFAULTS, **local_settings()}
+
+
+def _resolve(req: BaseModel, keys: tuple[str, ...]) -> dict:
+    """The request's own value for each key it set; the saved/repo default otherwise."""
+    eff = effective_settings()
+    return {k: (getattr(req, k) if k in req.model_fields_set else eff[k]) for k in keys}
+
+
 class SpeakReq(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT)
     instruction: str | None = None  # None = the default for the language (see speak())
     preset: str = DEFAULT_PRESET
     language: str = Field("en", pattern=r"^(en|ro)$")  # en: Breeze; ro: OmniVoice
-    seed: int | None = Field(DEFAULT_SEED, ge=0, lt=2**32)  # omitted: the house seed; null: random
+    seed: int | None = Field(DEFAULT_SEED, ge=0, lt=2**32)  # omitted: the default seed; null: random
 
     @field_validator("text")
     @classmethod
@@ -609,8 +733,11 @@ def presets():
 
 @app.post("/api/speak")
 def speak(req: SpeakReq):
+    # Anything the request didn't set comes from the saved settings (or the repo's).
+    # The language stays the request's own: saved settings never switch an agent's language.
+    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "check"))
     try:
-        preset = voicefx.load_preset(req.preset)
+        preset = voicefx.load_preset(opt["preset"])
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc)) from exc
     use_breeze = req.language in BREEZE_LANGS
@@ -619,28 +746,29 @@ def speak(req: SpeakReq):
     if use_breeze:
         # With a voice to keep and no description, clone it as is: the preset's
         # description would steer the voice away from the kept one.
-        default = "" if like else stock
+        saved = local_settings().get("instruction")
+        default = "" if like else (saved or stock)
         instruction = (default if req.instruction is None else req.instruction).strip()
-        use_house = False
+        use_default_voice = False
     else:
         # OmniVoice reads attributes, not the presets' Breeze prose. Without explicit
-        # attributes (or --like), Romanian clones the house voice: a deep English take.
+        # attributes (or --like), Romanian clones the default voice: a deep English take.
         given = (req.instruction or "").strip()
         instruction = given if given and given != stock.strip() else ""
-        use_house = not like and not instruction
-    seed = req.seed if req.seed is not None else secrets.randbelow(2**31)
+        use_default_voice = not like and not instruction
+    seed = opt["seed"] if opt["seed"] is not None else secrets.randbelow(2**31)
     if like:
         load_take(like)  # 400/404 before taking the lock
 
     with _lock:
         OUTPUT.mkdir(exist_ok=True)
-        if use_house:
-            try:
-                like = house_voice()
-            except Exception as exc:
-                raise HTTPException(500, f"could not make the house voice: {type(exc).__name__}: {exc}") from exc
         ref_audio = ref_text = None
-        if like:
+        if use_default_voice:
+            try:
+                ref_audio, ref_text, like = default_voice_ref()
+            except Exception as exc:
+                raise HTTPException(500, f"could not make the default voice: {type(exc).__name__}: {exc}") from exc
+        elif like:
             ref_audio, ref_text = take_paths(like)["dry"], load_take(like)["text"]
         tid = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
         dry_path = take_paths(tid)["dry"]
@@ -648,12 +776,12 @@ def speak(req: SpeakReq):
         try:
             if use_breeze:
                 engine = tts()
-                dry, cfg_used = engine.synth(req.text, instruction, seed, req.cfg_scale, ref_audio, ref_text)
+                dry, cfg_used = engine.synth(req.text, instruction, seed, opt["cfg_scale"], ref_audio, ref_text)
                 sf.write(dry_path, dry, engine.sample_rate, subtype="PCM_16")
                 model, extra = "breeze-tts-2", {"cfg_scale": cfg_used}
                 dry_s = len(dry) / engine.sample_rate
             else:
-                speed = req.speed or OMNI_DEFAULT_SPEED
+                speed = opt["speed"] or OMNI_DEFAULT_SPEED
                 r = omni_take(req.text, req.language, None if ref_audio else instruction,
                               seed, speed, dry_path, ref_audio, ref_text)
                 model, extra = "omnivoice", {"speed": speed, **r}
@@ -666,7 +794,7 @@ def speak(req: SpeakReq):
 
         meta = {"id": tid, "text": req.text, "language": req.language,
                 "instruction": "" if (ref_audio and not use_breeze) else instruction, "seed": seed,
-                **extra, "like": like, "house_voice": use_house, "model": model,
+                **extra, "like": like, "default_voice": use_default_voice, "model": model,
                 "dry_duration_s": round(dry_s, 2), "gen_s": round(gen_s, 2)}
         weak = [x for x in meta.get("sentences", []) if x["match"] < OMNI_GOOD_MATCH]
         if weak:
@@ -677,31 +805,69 @@ def speak(req: SpeakReq):
             meta.setdefault("warnings", []).append(f"hit the model's {MAX_TAKE_S:.0f} s ceiling: the end of the text is probably "
                                 "missing. Split it into shorter takes (use --like to keep the voice).")
         take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        res = render(tid, meta, req.preset, req.check, req.pitch, req.tempo, req.reverb)
+        res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
     return {**meta, **res, "gen_s": round(gen_s, 2)}
 
 
-class HouseReq(BaseModel):
+class VoiceReq(BaseModel):
     id: str
 
 
-@app.get("/api/house-voice")
-def get_house():
-    tid = current_house_voice()
-    return json.loads(HOUSE_FILE.read_text(encoding="utf-8")) if tid else {"id": None}
+# /api/house-voice is the old address, kept so existing scripts keep working.
+@app.get("/api/default-voice")
+@app.get("/api/house-voice", include_in_schema=False)
+def get_default_voice():
+    return default_voice_info() or {"id": None}
 
 
-@app.post("/api/house-voice")
-def put_house(req: HouseReq):
+@app.post("/api/default-voice")
+@app.post("/api/house-voice", include_in_schema=False)
+def put_default_voice(req: VoiceReq):
     with _lock:
-        return set_house_voice(req.id)
+        return set_default_voice(req.id)
+
+
+@app.post("/api/default-voice/restore-previous")
+def restore_default_voice():
+    with _lock:
+        return restore_previous_voice()
+
+
+@app.get("/api/settings")
+def get_settings():
+    local = local_settings()
+    return {"effective": {**REPO_DEFAULTS, **local}, "saved": local, "repo": REPO_DEFAULTS,
+            "file": SETTINGS_FILE.name if SETTINGS_FILE.is_file() else None}
+
+
+@app.post("/api/settings")
+def save_settings(new: Settings):
+    if new.preset is not None:
+        try:
+            voicefx.load_preset(new.preset)
+        except FileNotFoundError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    # Only what differs from the repo's defaults is stored: if those change in an update,
+    # anything the user never chose follows along.
+    data = {k: v for k, v in new.model_dump(exclude_unset=True).items() if v != REPO_DEFAULTS.get(k)}
+    if "seed" in new.model_fields_set and new.seed is None:
+        data["seed"] = None  # "random" is a real choice: keep it even though it isn't a number
+    SETTINGS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return get_settings()
+
+
+@app.delete("/api/settings")
+def reset_settings():
+    SETTINGS_FILE.unlink(missing_ok=True)
+    return get_settings()
 
 
 @app.post("/api/fx")
 def refx(req: FxReq):
     meta = load_take(req.id)
+    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "check"))
     with _lock:
-        return {**meta, **render(req.id, meta, req.preset, req.check, req.pitch, req.tempo, req.reverb)}
+        return {**meta, **render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])}
 
 
 @app.get("/files/{name}")

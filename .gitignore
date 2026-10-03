@@ -4,6 +4,9 @@
 # still be clean.
 
 # --- your audio ------------------------------------------------------------
+# The default voice's stored recording, and your saved settings: local only.
+voices/
+config.local.json
 # Whole directories, not extensions: takes, transcripts, spectrograms and any
 # reference audio you bring in. Nothing in here is ever tracked.
 input/

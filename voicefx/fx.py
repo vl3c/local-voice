@@ -338,13 +338,14 @@ def load_preset(name: str) -> dict:
 
 
 def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
-          reverb: str = "none", tail_s: float = 2.5) -> np.ndarray:
+          reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5) -> np.ndarray:
     """Run a preset over mono audio at any rate; returns 48 kHz mono float32.
 
     pitch (semitones) and tempo (1 = as generated, below 1 = slower) apply to the
     finished sound, after the preset: pitch moves everything down together, the
     machine's tone and the size of its "throat" alike, like a bigger instrument;
     tempo changes speed without changing pitch. reverb (a REVERBS key) adds a space last.
+    Every take ends at the same loudness, `target_lufs` (see normalise_loudness).
 
     Empty input gives empty output; silence (and NaN/inf, treated as silence)
     gives silence of the same length rather than amplified noise.
@@ -379,7 +380,63 @@ def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: f
     y = _trim_tail(np.nan_to_num(y))
     if _peak(y) < SILENCE:
         return np.zeros(len(y), dtype=np.float32)
-    return (y * (db(-1.0) / _peak(y))).astype(np.float32)
+    return normalise_loudness(y, target_lufs)
+
+
+TARGET_LUFS = -16.0   # speech on phones, podcasts, messengers
+PEAK_CEILING_DB = -1.0
+
+
+def normalise_loudness(y: np.ndarray, target_lufs: float = TARGET_LUFS) -> np.ndarray:
+    """Bring a take to `target_lufs` integrated loudness, peaks held under -1 dBFS.
+
+    Peak normalisation alone makes every take touch -1 dBFS, but a dense, distorted
+    preset then sounds several dB louder than a dynamic one. This matches what the
+    ear hears instead. When the gain pushes peaks over the ceiling, a limiter
+    catches them; it costs a little loudness, so the gain is corrected and the
+    limiter re-run (twice is enough: the correction is a fraction of a dB).
+    """
+    y = y.astype(np.float32)
+    current = loudness(y)
+    if not np.isfinite(current):
+        return y
+    out = y * db(target_lufs - current)
+    for _ in range(3):
+        if _peak(out) > db(PEAK_CEILING_DB):
+            out = run([pb.Limiter(threshold_db=PEAK_CEILING_DB - 0.5, release_ms=80)], out)
+        miss = target_lufs - loudness(out)
+        if abs(miss) < 0.2:
+            break
+        out = out * db(miss)
+    # Belt and braces: never leave a sample above the ceiling.
+    if _peak(out) > db(PEAK_CEILING_DB):
+        out = out * (db(PEAK_CEILING_DB) / _peak(out))
+    return out.astype(np.float32)
+
+
+# ITU-R BS.1770 K-weighting at 48 kHz: a high shelf (the head's acoustic effect) then
+# a high-pass (the "RLB" curve). Coefficients from the standard.
+_K_SHELF = ([1.53512485958697, -2.69169618940638, 1.19839281085285], [1.0, -1.69065929318241, 0.73248077421585])
+_K_HP = ([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621])
+
+
+def loudness(x: np.ndarray) -> float:
+    """Integrated loudness in LUFS (ITU-R BS.1770-4, mono, 48 kHz), the way streaming
+    services and broadcasters measure it: K-weighted, 400 ms blocks, gated so silence
+    and quiet tails don't drag it down. -inf for silence."""
+    y = signal.lfilter(*_K_HP, signal.lfilter(*_K_SHELF, x.astype(np.float64)))
+    block, step = int(0.4 * SR), int(0.1 * SR)
+    if len(y) < block:  # too short to gate: plain K-weighted mean square
+        ms = np.array([np.mean(y ** 2)])
+    else:
+        ms = np.array([np.mean(y[i:i + block] ** 2) for i in range(0, len(y) - block + 1, step)])
+    lufs = -0.691 + 10 * np.log10(ms + 1e-20)
+    keep = lufs > -70.0                                   # absolute gate
+    if not keep.any():
+        return float("-inf")
+    rel = -0.691 + 10 * np.log10(ms[keep].mean()) - 10.0  # relative gate
+    keep &= lufs > rel
+    return float(-0.691 + 10 * np.log10(ms[keep].mean()))
 
 
 def _peak(x: np.ndarray) -> float:

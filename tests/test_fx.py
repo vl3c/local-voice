@@ -24,7 +24,8 @@ def test_preset_runs(name):
     y = voicefx.apply(x, sr, voicefx.load_preset(name))
     assert y.dtype == np.float32 and y.ndim == 1
     assert np.isfinite(y).all()
-    assert 0.5 < np.max(np.abs(y)) <= 0.9  # peak-normalised to -1 dBFS
+    assert np.max(np.abs(y)) <= 0.892  # peaks held under -1 dBFS
+    assert abs(fx.loudness(y) - fx.TARGET_LUFS) < 0.5  # every preset at the same loudness
     assert len(y) >= len(x) * fx.SR / sr * 0.85  # the tail is trimmed; nothing collapses
 
 
@@ -102,3 +103,16 @@ def test_unknown_reverb_is_an_error():
     x, sr = fake_voice()
     with pytest.raises(ValueError):
         voicefx.apply(x, sr, voicefx.load_preset("dry"), reverb="stadium")
+
+
+def test_loudness_matches_the_bs1770_reference():
+    # The standard's calibration point: a 997 Hz sine at full scale reads -3.01 LUFS.
+    t = np.arange(5 * fx.SR) / fx.SR
+    sine = 0.1 * np.sin(2 * np.pi * 997 * t)
+    assert fx.loudness(sine) == pytest.approx(-23.01, abs=0.1)
+
+
+def test_presets_end_at_the_same_loudness():
+    x, sr = fake_voice(seconds=3.0)
+    levels = [fx.loudness(voicefx.apply(x, sr, voicefx.load_preset(n))) for n in voicefx.list_presets()]
+    assert max(levels) - min(levels) < 0.5

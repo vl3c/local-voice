@@ -1,0 +1,116 @@
+{
+  "description": "Sovereign-style, after measuring the original's spectrum: the human voice stays audible and deep (~65 Hz, with its intonation), and under it a steady buzzing hum an octave lower at C1 (32.7 Hz) that only sounds while he speaks and rings for a moment after each phrase (a vocoded drone through a 30.6 ms feedback comb, whose resonances fall on the hum's own harmonics). Light grit, and the original's dark midrange: a deep scoop around 420 Hz and a darker top above 2 kHz.",
+  "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 50
+    },
+    {
+      "op": "compress",
+      "threshold_db": -30,
+      "ratio": 4,
+      "attack_ms": 4,
+      "release_ms": 120,
+      "makeup_db": 6
+    }
+  ],
+  "buses": [
+    {
+      "name": "voice",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "formant",
+          "ratio": 0.92
+        },
+        {
+          "op": "drive",
+          "drive_db": 10,
+          "mix": 0.25
+        }
+      ]
+    },
+    {
+      "name": "hum",
+      "gain_db": -2,
+      "chain": [
+        {
+          "op": "vocoder",
+          "f0": 32.7,
+          "chord": [
+            1,
+            2,
+            3
+          ],
+          "follow": 0,
+          "bands": 24,
+          "fmin": 40,
+          "fmax": 4000,
+          "noise": 0.0,
+          "fricatives": 0.0,
+          "metal": 0.15,
+          "sub": 0,
+          "smooth_ms": 25
+        },
+        {
+          "op": "comb",
+          "delay_ms": 30.6,
+          "feedback": 0.6,
+          "mix": 0.6
+        },
+        {
+          "op": "eq",
+          "bands": [
+            {
+              "type": "highpass",
+              "hz": 110
+            },
+            {
+              "type": "peak",
+              "hz": 170,
+              "gain_db": 8,
+              "q": 1.1
+            },
+            {
+              "type": "lowpass",
+              "hz": 2500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "lowshelf",
+          "hz": 80,
+          "gain_db": 4
+        },
+        {
+          "type": "peak",
+          "hz": 420,
+          "gain_db": -8,
+          "q": 0.7
+        },
+        {
+          "type": "highshelf",
+          "hz": 2000,
+          "gain_db": -5,
+          "q": 0.7
+        },
+        {
+          "type": "lowpass",
+          "hz": 9000
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

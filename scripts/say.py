@@ -2,15 +2,17 @@
 
 The server must be running (start.cmd). Everything stays on 127.0.0.1.
 
-    python scripts/say.py "We are the dark."              # house defaults: harbinger, seed 74525860, light room
+    python scripts/say.py "We are the dark."              # defaults: reaper-drone, strength 6, seed 74525861, light room
     python scripts/say.py "We are the dark." --seed random --reverb none --no-check
     python scripts/say.py "..." --instruction "An ancient, colossal voice..." --seed 7
     python scripts/say.py "..." --preset harbinger --check --out some/dir
     python scripts/say.py "..." --like 20260101-120000-ab12                     # same voice as that take
-    python scripts/say.py "Noi suntem întunericul." --lang ro          # clones the house voice
+    python scripts/say.py "Noi suntem întunericul." --lang ro          # clones the default voice
     python scripts/say.py "Noi suntem întunericul." --lang ro --like 20260101-120000-ab12
-    python scripts/say.py --house-voice                                 # show it
-    python scripts/say.py --house-voice 20260101-120000-ab12            # set it
+    python scripts/say.py --default-voice                               # show it
+    python scripts/say.py --default-voice 20260101-120000-ab12          # set it
+    python scripts/say.py --default-voice previous                      # undo the last change
+    python scripts/say.py --settings                                    # the defaults in effect
     python scripts/say.py --fx 20260101-120000-ab12 --preset harbinger --check  # re-run effects only
     python scripts/say.py --presets
 
@@ -107,8 +109,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("text", nargs="?", help="what to say (English; (sigh)-style vocal events allowed)")
     ap.add_argument("--instruction", help="voice description. English: default the preset's suggested one ('' for "
-                    "none; with --like, default is a pure clone). Romanian: attributes; default clones the house voice")
-    ap.add_argument("--preset", help="effects preset (default: harbinger)")
+                    "none; with --like, default is a pure clone). Romanian: attributes; default clones the default voice")
+    ap.add_argument("--preset", help="effects preset (default: reaper-drone)")
     ap.add_argument("--lang", default="en", choices=["en", "ro"], help="en (default): Breeze TTS 2; ro: OmniVoice")
     ap.add_argument("--speed", type=float, help="Romanian only: the model's speaking rate, 0.75-1.3, default 0.85 "
                     "(for slower than that, use --tempo)")
@@ -120,16 +122,19 @@ def main() -> int:
     ap.add_argument("--tempo", type=float, default=1.0, help="time-stretch, 0.5-1.5, applied with the effects "
                     "(0.85 = slower, same pitch); works with --fx too")
     ap.add_argument("--seed", help="a number to reproduce a take; 'random' for a new voice "
-                    "(default: the house seed, 74525860)")
-    ap.add_argument("--cfg", type=float, default=4.0, help="Breeze only: instruction strength (default 4)")
+                    "(default: 74525861)")
+    ap.add_argument("--cfg", type=float, help="English only: instruction strength (default 6; Breeze recommends 4)")
     ap.add_argument("--like", metavar="TAKE", help="keep the voice of an earlier take (voice direction)")
     ap.add_argument("--check", action="store_true", default=None,
                     help="transcribe with Whisper and draw a spectrogram (on by default)")
     ap.add_argument("--no-check", dest="check", action="store_false", help="skip the transcription check")
     ap.add_argument("--fx", metavar="TAKE", help="re-run effects on an earlier take; no new generation")
     ap.add_argument("--presets", action="store_true", help="list presets and exit")
-    ap.add_argument("--house-voice", nargs="?", const="", metavar="TAKE",
-                    help="show the house voice (what Romanian clones by default), or set it to TAKE")
+    ap.add_argument("--default-voice", "--house-voice", dest="default_voice", nargs="?", const="", metavar="TAKE",
+                    help="show the default voice (what Romanian clones unless told otherwise), set it to TAKE, "
+                    "or 'previous' to undo the last change")
+    ap.add_argument("--settings", action="store_true",
+                    help="show the defaults in effect: built-in, or the user's saved ones (config.local.json)")
     ap.add_argument("--out", type=Path, help="copy results here (never overwrites)")
     ap.add_argument("--name", help="file name stem for --out")
     ap.add_argument("--format", choices=["both", "wav", "mp3"], default="both",
@@ -140,8 +145,8 @@ def main() -> int:
 
     if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
         ap.error("--seed takes a number or 'random'")
-    if not (args.text or args.fx or args.presets or args.house_voice is not None):
-        ap.error("give the text to say, or --fx TAKE, --presets or --house-voice")
+    if not (args.text or args.fx or args.presets or args.default_voice is not None or args.settings):
+        ap.error("give the text to say, or --fx TAKE, --presets, --settings or --default-voice")
     if not wait_for_server(args.wait):
         print(f"No server at {SERVER}. Start it with start.cmd (or start.cmd --no-browser).")
         return 1
@@ -150,10 +155,27 @@ def main() -> int:
         for k, v in call("/api/presets").items():
             print(f"{k}\n  {v['description']}\n  voice: {v['instruction'] or '(none)'}\n")
         return 0
-    if args.house_voice is not None:
-        h = call("/api/house-voice", {"id": args.house_voice} if args.house_voice else None)
-        print(f"house voice: take {h['id']} ({h['f0_hz']} Hz median pitch)" if h.get("id")
-              else "no house voice yet: the first Romanian line without --instruction or --like makes one")
+    if args.settings:
+        st = call("/api/settings")
+        src = f"your saved defaults ({st['file']}) over the built-in ones" if st["file"] else "the built-in defaults"
+        print(f"in effect: {src}")
+        for k, v in st["effective"].items():
+            mark = "  (saved)" if k in st["saved"] else ""
+            shown = "random" if (k == "seed" and v is None) else ("the preset's" if (k == "instruction" and not v) else v)
+            print(f"  {k:12s} {shown}{mark}")
+        return 0
+    if args.default_voice is not None:
+        if args.default_voice.lower() == "previous":
+            h = call("/api/default-voice/restore-previous", {})
+        else:
+            h = call("/api/default-voice", {"id": args.default_voice} if args.default_voice else None)
+        if not h.get("id"):
+            print("no default voice yet: the first Romanian line without --instruction or --like makes one")
+        else:
+            print(f"default voice: take {h['id']} ({h['f0_hz']} Hz median pitch)")
+            if h.get("previous"):
+                p = h["previous"]
+                print(f"previous: take {p['id']} ({p.get('f0_hz')} Hz); restore it with --default-voice previous")
         return 0
     if args.fx:
         res = call("/api/fx", given({"id": args.fx, "preset": args.preset, "check": args.check,
@@ -164,7 +186,7 @@ def main() -> int:
                       "language": args.lang, "speed": args.speed,
                       "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
                       "check": args.check})
-        if args.seed is not None:  # omitted: the server's house seed
+        if args.seed is not None:  # omitted: the server's default seed
             body["seed"] = None if args.seed.lower() == "random" else int(args.seed)
         res = call("/api/speak", body)
 
@@ -182,7 +204,7 @@ def main() -> int:
             if res.get("instruction"):
                 print(f"voice: {res['instruction']}")
             elif res.get("like"):
-                print(f"voice: {'house voice, ' if res.get('house_voice') else ''}cloned from take {res['like']}")
+                print(f"voice: {'default voice, ' if res.get('default_voice') else ''}cloned from take {res['like']}")
         timing = [f"{k} {res[k]}s" for k in ("duration_s", "gen_s", "fx_s") if k in res]
         print("  ".join(timing))
         if "heard" in res:
