@@ -21,7 +21,7 @@ written: `~` works in Bash, and `cygpath -w` gives `cmd` the Windows form of the
 
 ```bash
 curl -s http://127.0.0.1:8190/api/health                     # JSON = the server is up
-cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window                      # if not: opens its own window, ~1 min warmup
+cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --no-browser                  # if not: opens its own window, ~1 min warmup
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --wait 180 --out <dir>   # make a take with the user's defaults
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --play --no-check        # or say it out loud right now
 ```
@@ -90,7 +90,7 @@ that skill's own `stop.cmd`.
 **Start the server in its own window:**
 
 ```bash
-cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window
+cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --no-browser
 ```
 
 This returns at once and opens a visible console window titled "local-voice server - close this
@@ -102,7 +102,7 @@ close. It loads the model in ~10 s, then **warms up its fast paths for ~35-50 s*
 **If the server doesn't come up,** read its log: `~/.claude/skills/local-voice/logs/server.log`
 (the previous run is `server.previous.log`). The window shows only milestones and errors; the log
 has everything, timestamped. If the fast-path warmup fails (a Triton or driver problem), start it in eager mode instead, about 6x slower but with no compilation:
-`cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window --safe`.
+`cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --no-browser --safe`.
 
 **If `.venv` or `models/` is missing,** the tool isn't installed. `install.ps1` downloads ~23 GB;
 ask the user before running it.

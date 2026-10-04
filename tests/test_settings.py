@@ -20,8 +20,6 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "OUTPUT", tmp_path / "output")
     monkeypatch.setattr(server, "VOICES", tmp_path / "voices")
     monkeypatch.setattr(server, "SETTINGS_FILE", tmp_path / "config.local.json")
-    monkeypatch.setattr(server, "OLD_VOICE_FILES", (tmp_path / "output" / "default_voice.json",
-                                                    tmp_path / "output" / "house_voice.json"))
     (tmp_path / "output").mkdir()
     return server
 
@@ -111,13 +109,6 @@ def test_setting_the_same_voice_twice_keeps_the_real_previous(app):
     app.set_default_voice(a)
     app.set_default_voice(b)
     assert app.set_default_voice(b)["previous"]["id"] == a
-
-
-def test_old_pointer_in_output_is_migrated(app):
-    tid = make_take(app, "20260101-120000-cccc")
-    (app.OUTPUT / "house_voice.json").write_text(json.dumps({"id": tid, "f0_hz": 65.0}), encoding="utf-8")
-    assert app.default_voice_info()["id"] == tid
-    assert not (app.OUTPUT / "house_voice.json").exists() and (app.VOICES / "default.wav").is_file()
 
 
 # ------------------------------------------------------------------ takes

@@ -147,7 +147,7 @@ def main() -> int:
     ap.add_argument("--no-check", dest="check", action="store_false", help="skip the transcription check")
     ap.add_argument("--fx", metavar="TAKE", help="re-run effects on an earlier take; no new generation")
     ap.add_argument("--presets", action="store_true", help="list presets and exit")
-    ap.add_argument("--default-voice", "--house-voice", dest="default_voice", nargs="?", const="", metavar="TAKE",
+    ap.add_argument("--default-voice", dest="default_voice", nargs="?", const="", metavar="TAKE",
                     help="show the default voice (what Romanian clones unless told otherwise), set it to TAKE, "
                     "or 'previous' to undo the last change")
     ap.add_argument("--settings", action="store_true",

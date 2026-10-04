@@ -161,10 +161,11 @@ Verify the weights at any time without downloading anything:
 ## Using it
 
 **`.\start.cmd`** loads the model (~10 s), warms up the CUDA-graph fast paths (~35-50 s), then
-opens the page. `start.cmd --window` starts the server only, in its own console window titled
-"local-voice server - close this window to stop it", and returns at once: that's how agents start
-it, so a server is never running out of sight, and closing the window stops it (and frees the GPU).
-`start.cmd --no-browser` runs it in the current console, for scripts that manage it. A second start
+opens the page. It always runs in its own console window titled "local-voice server - close this
+window to stop it", and `start.cmd` returns at once, so a server is never running out of sight;
+closing the window stops it and frees the GPU. `start.cmd --no-browser` does the same without
+opening the page (that's how agents start it); `start.cmd --here` runs it in the current console
+instead, for scripts that manage the process themselves. A second start
 while one is running exits at once ("port in use") instead of loading another copy. Close the
 console window, or run `.\stop.cmd`, to free the VRAM: it stops the server recorded in
 `output\.server.pid` and its Romanian worker, however it was started.
@@ -284,7 +285,7 @@ explanation. `Ctrl+Enter` speaks.
 | Effects | ~0.2x real time |
 | Whisper check | ~1 s |
 
-Without the fast paths (`start.cmd --window --safe`) generation is about 2.5x *slower* than real
+Without the fast paths (`start.cmd --safe`) generation is about 2.5x *slower* than real
 time.
 
 ## Notes and gotchas
