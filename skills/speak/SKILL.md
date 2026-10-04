@@ -46,10 +46,10 @@ skill's own folder with `..`: the skills are links, and `..` resolves to the wro
    stop it") and the command returns at once:
 
    ```bash
-   cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --window
+   cmd //c "$(cygpath -w ~/.claude/skills/local-voice/start.cmd)" --no-browser
    ```
 
-   In PowerShell instead: `& "$env:USERPROFILE\.claude\skills\local-voice\start.cmd" --window`.
+   In PowerShell instead: `& "$env:USERPROFILE\.claude\skills\local-voice\start.cmd" --no-browser`.
    Tell the user in chat that the voice is warming up (about a minute the first time) and that
    closing that window stops it. Step 3's `--wait 180` waits for it to be ready. If it still
    isn't up after that, read the end of its log, `~/.claude/skills/local-voice/logs/server.log`,

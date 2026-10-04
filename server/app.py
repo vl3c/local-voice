@@ -584,7 +584,6 @@ DEFAULT_REVERB = "room"
 # The default voice: the take Romanian lines clone unless told otherwise. OmniVoice's own deepest
 # design ("very low pitch") sits around 100-125 Hz and sounds small under the Reaper
 # presets; Breeze's lands near 65 Hz. Cloning a Breeze take carries that depth over.
-OLD_VOICE_FILES = (OUTPUT / "default_voice.json", OUTPUT / "house_voice.json")  # where it lived before voices/
 VOICE_TEXT = "You exist because we allow it. You will end because we demand it."
 VOICE_INSTRUCTION = ("Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly "
                      "and calmly with cold, absolute authority and no emotion, every word measured and final, "
@@ -615,22 +614,6 @@ def _read_slot(name: str) -> dict:
     return info if wav.is_file() and info.get("text") else {}
 
 
-def _migrate_old_default_voice() -> None:
-    """Earlier versions kept only a pointer in output/: copy that take into voices/ while it still exists."""
-    if _read_slot("default"):
-        return
-    for old in OLD_VOICE_FILES:
-        try:
-            tid = json.loads(old.read_text(encoding="utf-8")).get("id", "")
-        except (OSError, ValueError):
-            continue
-        if TAKE_ID.fullmatch(tid) and take_paths(tid)["dry"].is_file() and take_paths(tid)["meta"].is_file():
-            _store("default", tid)
-            for o in OLD_VOICE_FILES:
-                o.unlink(missing_ok=True)
-            return
-
-
 def _store(name: str, tid: str) -> dict:
     meta = load_take(tid)
     VOICES.mkdir(exist_ok=True)
@@ -647,7 +630,6 @@ def default_voice_info() -> dict:
     It lives in voices/ as a copy of the take's recording, so clearing output/ never
     loses it. "id" is the take it was copied from, which may since have been deleted.
     """
-    _migrate_old_default_voice()
     info = _read_slot("default")
     if info:
         prev = _read_slot("previous")
@@ -925,15 +907,12 @@ class VoiceReq(BaseModel):
     id: str
 
 
-# /api/house-voice is the old address, kept so existing scripts keep working.
 @app.get("/api/default-voice")
-@app.get("/api/house-voice", include_in_schema=False)
 def get_default_voice():
     return default_voice_info() or {"id": None}
 
 
 @app.post("/api/default-voice")
-@app.post("/api/house-voice", include_in_schema=False)
 def put_default_voice(req: VoiceReq):
     with _lock:
         return set_default_voice(req.id)
