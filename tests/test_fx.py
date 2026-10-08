@@ -190,3 +190,30 @@ def test_double_delays_the_machine_inside_a_blend():
     assert not np.allclose(plain[: len(plain) // 2], doubled[: len(plain) // 2], atol=1e-3)
     with pytest.raises(ValueError):
         voicefx.apply(x, sr, p, blend=1.5)
+
+
+def dark_voice(sr=24000, seconds=2.0, cutoff=700.0):
+    """A voice with almost nothing above 1 kHz: the vocoder's worst case."""
+    from scipy import signal
+    x, _ = bursts(sr)
+    return signal.sosfilt(signal.butter(6, cutoff / (sr / 2), output="sos"), x).astype(np.float32), sr
+
+
+def test_dark_voices_are_brightened_for_the_machine_only():
+    x, sr = dark_voice()
+    assert fx.articulation_boost(fx.to_sr(x, sr)) > 6
+    p = voicefx.load_preset("reaper-drone")
+    _, voice_on = voicefx.apply_layers(x, sr, p)
+    off = dict(p, articulation=False)
+    _, voice_off = voicefx.apply_layers(x, sr, off)
+    n = min(len(voice_on), len(voice_off))  # each render trims its own silent tail
+    assert np.allclose(voice_on[:n], voice_off[:n], atol=1e-5)  # the stem is the voice as recorded
+    a, b = voicefx.apply(x, sr, p), voicefx.apply(x, sr, off)
+    n = min(len(a), len(b))
+    assert not np.allclose(a[:n], b[:n], atol=1e-3)
+
+
+def test_bright_voices_are_left_alone():
+    x, sr = bursts()  # a buzzy square wave: plenty above 1 kHz
+    assert fx.articulation_boost(fx.to_sr(x, sr)) == 0.0
+    assert voicefx.load_preset("dry").get("articulation") is False

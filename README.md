@@ -127,6 +127,14 @@ Breeze keeps the voice but steers its delivery ("voice direction").
 
 All of them transcribe at 100% of words with Whisper on four test takes (`demon`: 88% on one).
 
+**Dark voices are brightened for the machine.** The presets were tuned on deep male voices,
+which have plenty of energy at 1-4 kHz, where consonants and formants are. A darker voice (a
+low female one, say) starves the vocoder there and comes out a muddy drone, so before the
+machine hears it, a voice measuring below -15 dB on that band (relative to 60 Hz-1 kHz) is
+lifted with a high shelf at 1 kHz, up to +12 dB. Male voices measure -5.5 to -14.6 and are left
+alone; the voice stem and the `dry` preset are never changed. The take reports
+`articulation_boost_db`; a preset can opt out with `"articulation": false`.
+
 Add your own by copying a JSON file in `voicefx/presets/`. A preset is a `pre` chain, parallel
 `buses` mixed at `gain_db`, and a `post` chain. Every op and its parameters are listed in
 `voicefx/fx.py` (`OPS`, `op_vocoder`). The vocoder's main knobs are `f0` (the machine's pitch),
@@ -220,7 +228,7 @@ python scripts\say.py --presets
 | `--double MS` | With `--blend`: the machine trails the voice by MS ms (0-60). 10-30 thickens the two into one doubled voice (it can read as extra reverb); 0, the default, keeps them exactly together. |
 | `--bass DB` | Shelve everything under 150 Hz, -12..6 dB, before loudness matching. -6 when a take warns that the words sit low under the bass. |
 | `--trim-tail` / `--no-trim-tail` | Cut stray sound after the last scripted word (an "mmm", a breath), in the gap after it; the take remembers the cut, so later `--fx` renders keep it. The dry file is untouched; `--no-trim-tail` undoes it. |
-| `--reverb KIND` | `none`, `room` (light; default), `hall` (medium), `cathedral` (heavy). |
+| `--reverb KIND` | `none`, `room` (light; default), `hall` (medium), `cathedral` (heavy, ~4.5 s tail). |
 | `--like TAKE` | Keep an earlier take's voice for a new line, in either language, so a scene sounds like one speaker. |
 | `--default-voice [TAKE]` | Show the default voice, set it to TAKE, or `previous` to undo the last change. |
 | `--settings` | Show the defaults in effect (built-in, or saved in `config.local.json`). |

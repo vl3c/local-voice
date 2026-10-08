@@ -225,6 +225,9 @@ lines with `--like`.
 - **Mood goes in the description too:** "contemptuous", "patient, almost amused", "furious but
   controlled". The presets keep whatever performance the model gives.
 - **Vocal events** work inline in the text: `(sigh)`, `(laugh)`, `(clears throat)`.
+- **Female and other higher voices** work with the machine presets: a dark voice is brightened
+  automatically before the vocoder (`articulation_boost_db` in the response). Blends
+  (`--blend 0.3-0.5`) keep a female voice especially clear; `harbinger` suits them least.
 
 ## 4. Judge every take
 

@@ -327,7 +327,7 @@ REVERBS = {
     "none": None,
     "room": dict(room_size=0.62, damping=0.5, wet=0.16, dry=0.92, predelay_ms=0, tail_s=1.5),
     "hall": dict(room_size=0.86, damping=0.4, wet=0.26, dry=0.86, predelay_ms=20, tail_s=3.0),
-    "cathedral": dict(room_size=0.97, damping=0.22, wet=0.38, dry=0.78, predelay_ms=45, tail_s=6.0),
+    "cathedral": dict(room_size=0.94, damping=0.35, wet=0.24, dry=0.88, predelay_ms=40, tail_s=4.5),
 }
 
 
@@ -375,6 +375,11 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
     1 = all voice (see blend_layers). double_ms > 0 lets the machine trail the voice
     by that many ms, a doubling that thickens the blend.
 
+    A dark voice (little energy at 1-4 kHz, where consonants and formants are) is
+    brightened before the machine hears it, so its words survive the vocoder (see
+    articulation_boost); a preset can opt out with "articulation": false. The voice
+    stem stays as recorded.
+
     bass_db shelves everything under BASS_HZ up or down (negative = less bass), on
     both layers, before loudness normalisation: a take whose words sit low under
     its bass (see speech_lufs) gets clearer with -3 to -9.
@@ -397,7 +402,9 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
     if not len(voice) or _peak(voice) < SILENCE:
         return np.zeros(len(voice), dtype=np.float32), np.zeros(len(voice), dtype=np.float32)
     pre = [op for op in preset.get("pre", []) if not op.get("off")]
-    x = chain(voice, [op for op in pre if op["op"] != "stretch"])
+    boost = articulation_boost(voice) if preset.get("articulation", True) else 0.0
+    heard = op_eq(voice, bands=[{"type": "highshelf", "hz": 1000.0, "gain_db": boost, "q": 0.7}]) if boost else voice
+    x = chain(heard, [op for op in pre if op["op"] != "stretch"])
 
     # Buses may change length (a stretch inside one): mix at the longest.
     outs = [(chain(x.copy(), bus.get("chain", [])), db(bus.get("gain_db", 0.0)))
@@ -447,6 +454,31 @@ def stretch_rate(preset: dict, tempo: float = 1.0) -> float:
     A time t in the render is t * stretch_rate in the dry take."""
     pre = [op for op in preset.get("pre", []) if not op.get("off")]
     return float(np.prod([op.get("rate", 1.0) for op in pre if op["op"] == "stretch"])) * tempo
+
+
+# How bright a voice is: its 1-4 kHz energy against 60 Hz-1 kHz, in dB. The presets
+# were tuned on deep male voices measuring -5.5 to -14.6 here, and need nothing. A
+# dark voice starves the vocoder of articulation and comes out a muddy drone: an
+# "ancient female" at -19 did, and sounded best brightened by +12 dB. Below the floor
+# the boost ramps up smoothly (no jump between two takes of one voice) to that maximum.
+ARTICULATION_FLOOR_DB = -15.0
+ARTICULATION_SLOPE = 3.0
+ARTICULATION_MAX_DB = 12.0
+
+
+def articulation_db(x: np.ndarray) -> float:
+    """1-4 kHz energy relative to 60 Hz-1 kHz, in dB (48 kHz audio)."""
+    f, p = signal.welch(np.asarray(x, dtype=np.float64), SR, nperseg=8192)
+    low, art = p[(f >= 60) & (f < 1000)].sum(), p[(f >= 1000) & (f < 4000)].sum()
+    return float(10 * np.log10(max(art, 1e-20) / max(low, 1e-20)))
+
+
+def articulation_boost(x: np.ndarray) -> float:
+    """How many dB a high shelf at 1 kHz should lift this voice for the presets (0 if bright enough)."""
+    if _peak(x) < SILENCE:
+        return 0.0
+    gain = ARTICULATION_SLOPE * (ARTICULATION_FLOOR_DB - articulation_db(x))
+    return round(float(np.clip(gain, 0.0, ARTICULATION_MAX_DB)), 1)
 
 
 MAX_DOUBLE_MS = 60.0

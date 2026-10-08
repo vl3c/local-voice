@@ -567,6 +567,7 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
     sf.write(mp3_path, wet, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
              bitrate_mode="CONSTANT", compression_level=0.3)
 
+    boost = voicefx.articulation_boost(voicefx.fx.to_sr(dry, sr)) if preset.get("articulation", True) else 0.0
     speech = voicefx.speech_lufs(wet)
     if speech < voicefx.SPEECH_BURIED_LUFS:
         warnings.append(f"the words are buried under the bass (speech band {speech:.1f} LUFS; clear takes measure "
@@ -578,7 +579,8 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
            "blend": blend, "double_ms": double_ms, "bass_db": bass_db, "trim_end_s": meta.get("trim_end_s"),
            "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
                      "voice": voice_path.name},
-           "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1)}
+           "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1),
+           "articulation_boost_db": boost}
     if check:
         try:
             timeline = voicefx.timed_voice(dry, sr, preset, tempo)
