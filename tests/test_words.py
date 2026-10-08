@@ -86,3 +86,22 @@ def test_a_pause_inside_a_pair_becomes_their_boundary():
     a, b = wt.snap(wt.split_at_pauses(words, active), active)
     assert abs(a["end"] - 0.90) <= 0.011 and abs(b["start"] - 1.50) <= 0.011
 
+
+def test_stray_sound_after_the_last_word_is_found_with_a_cut_in_the_gap():
+    sr = 16000
+    audio = np.zeros(sr * 3, dtype=np.float32)
+    audio[int(0.2 * sr):int(1.0 * sr)] = 0.5    # the line
+    audio[int(1.6 * sr):int(2.2 * sr)] = 0.2    # "mmm"
+    words = [{"word": "hand", "start": 0.2, "end": 1.0}]
+    s = wt.stray_sound(words, wt.activity(audio, sr))
+    assert s["before"] is None
+    assert abs(s["after"]["start"] - 1.6) <= 0.011 and s["after"]["seconds"] >= 0.5
+    assert 1.0 < s["after"]["cut"] <= 1.15
+
+
+def test_a_clean_take_has_no_stray_sound():
+    sr = 16000
+    audio = np.zeros(sr * 2, dtype=np.float32)
+    audio[int(0.2 * sr):int(1.0 * sr)] = 0.5
+    s = wt.stray_sound([{"word": "hand", "start": 0.2, "end": 1.0}], wt.activity(audio, sr))
+    assert s == {"before": None, "after": None}

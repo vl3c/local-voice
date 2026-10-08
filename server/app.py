@@ -499,7 +499,7 @@ Reverb = Literal["none", "room", "hall", "cathedral"]
 
 
 def _fx_name(preset: str, pitch: float, tempo: float, reverb: str, blend: float = 0.0,
-             double_ms: float = 0.0) -> str:
+             double_ms: float = 0.0, bass_db: float = 0.0) -> str:
     name = f"fx-{preset}"
     if pitch:
         name += f"_pitch{pitch:+g}"
@@ -509,28 +509,53 @@ def _fx_name(preset: str, pitch: float, tempo: float, reverb: str, blend: float 
         name += f"_blend{blend:g}"
         if double_ms:
             name += f"_double{double_ms:g}"
+    if bass_db:
+        name += f"_bass{bass_db:+g}"
     if reverb != "none":
         name += f"_{reverb}"
     return name
 
 
 def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0.0, tempo: float = 1.0,
-           reverb: str = "none", blend: float = 0.0, double_ms: float = 0.0) -> dict:
-    """Apply a preset (plus pitch, tempo, blend, reverb) to a take's dry voice; optionally transcribe and draw it."""
+           reverb: str = "none", blend: float = 0.0, double_ms: float = 0.0, bass_db: float = 0.0,
+           trim_tail: bool | None = None) -> dict:
+    """Apply a preset (plus pitch, tempo, blend, bass, reverb) to a take's dry voice; optionally
+    transcribe and draw it.
+
+    trim_tail=True finds stray sound after the last scripted word (an "mmm", a breath)
+    and stores where to cut in the take, so every later render is cut there too;
+    False removes a stored cut; None keeps whatever the take has. The dry file itself
+    is never changed: the cut is applied before the effects, so tails decay naturally.
+    """
     try:
         preset = voicefx.load_preset(preset_name)
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc)) from exc
 
     dry, sr = sf.read(take_paths(tid)["dry"], dtype="float32")
+    warnings = list(meta.get("warnings", []))
+    if trim_tail is False and meta.pop("trim_end_s", None) is not None:
+        _save_meta(tid, meta)
+    if trim_tail and not meta.get("trim_end_s"):
+        timeline = voicefx.timed_voice(dry, sr, preset, tempo)
+        timing = word_timing(meta.get("spoken_text") or meta["text"], timeline, meta.get("language", "en"))
+        after = timing["stray"]["after"]
+        if after:
+            meta["trim_end_s"] = round(after["cut"] * voicefx.stretch_rate(preset, tempo), 3)
+            _save_meta(tid, meta)
+        else:
+            warnings.append("--trim-tail: nothing after the last word to trim")
+    if meta.get("trim_end_s"):
+        dry = _fade_out(dry[: int(meta["trim_end_s"] * sr)], sr)
+
     t0 = time.time()
     if not blend:
         double_ms = 0.0  # doubling is part of a blend: alone it would only delay the machine
     wet, voice = voicefx.apply_layers(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb,
-                                      blend=blend, double_ms=double_ms)
+                                      blend=blend, double_ms=double_ms, bass_db=bass_db)
     fx_s = time.time() - t0
     # "fx-" keeps every preset, including one called "dry", off the take's own files.
-    wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb, blend, double_ms)}.wav"
+    wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb, blend, double_ms, bass_db)}.wav"
     sf.write(wet_path, wet, voicefx.SR, subtype="PCM_16")
     # The human voice under the effects: same timing (sample for sample), pitch, reverb,
     # length and loudness as the processed take, for blending in an edit.
@@ -541,21 +566,43 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
     sf.write(mp3_path, wet, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
              bitrate_mode="CONSTANT", compression_level=0.3)
 
+    speech = voicefx.speech_lufs(wet)
+    if speech < voicefx.SPEECH_BURIED_LUFS:
+        warnings.append(f"the words are buried under the bass (speech band {speech:.1f} LUFS; clear takes measure "
+                        f"about -21 to -23): this base voice is too boomy for EQ to fix. Try another seed.")
+    elif speech < voicefx.SPEECH_QUIET_LUFS:
+        warnings.append(f"the words sit low under the bass (speech band {speech:.1f} LUFS; clear takes measure "
+                        f"about -21 to -23): try --bass -6, or another seed.")
     res = {"id": tid, "preset": preset_name, "pitch": pitch, "tempo": tempo, "reverb": reverb,
-           "blend": blend, "double_ms": double_ms,
+           "blend": blend, "double_ms": double_ms, "bass_db": bass_db, "trim_end_s": meta.get("trim_end_s"),
            "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
                      "voice": voice_path.name},
-           "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2)}
+           "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1)}
     if check:
         try:
             timeline = voicefx.timed_voice(dry, sr, preset, tempo)
             c = _check(tid, meta, dry, sr, wet, wet_path, timeline)
             res["files"].update(c.pop("files"))
+            warnings += c.pop("warnings")
             res.update(c)
         except Exception as exc:  # the take exists either way: return it, say the check failed
             res["check_error"] = f"{type(exc).__name__}: {exc}"
+    if warnings:
+        res["warnings"] = warnings
     _release_cache()
     return res
+
+
+def _save_meta(tid: str, meta: dict) -> None:
+    take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _fade_out(audio: np.ndarray, sr: int, seconds: float = 0.03) -> np.ndarray:
+    out = audio.copy()
+    n = min(len(out), int(seconds * sr))
+    if n:
+        out[-n:] *= np.linspace(1, 0, n, dtype=np.float32)
+    return out
 
 
 def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_path: Path,
@@ -584,6 +631,7 @@ def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_
     return {
         "files": files,
         "words": timing["words"],
+        "warnings": stray_warnings(timing, bool(meta.get("trim_end_s"))),
         "heard": {"dry": heard_dry, "wet": heard_wet},
         # Whisper writes numbers as digits or words at whim: normalise both sides the same way.
         "match": {"dry": word_match(expected, normalise(heard_dry, lang)),
@@ -605,7 +653,40 @@ def word_timing(expected: str, timeline: np.ndarray, lang: str) -> dict:
     words, extras = wordtiming.align(script, heard)
     active = wordtiming.activity(timeline, voicefx.SR)
     words = wordtiming.snap(wordtiming.split_at_pauses(words, active), active)
-    return {"words": words, "phrases": wordtiming.phrases(words, script, expected), "extras": extras}
+    stray = wordtiming.stray_sound(words, active)
+    for span in stray.values():
+        if span:
+            span["voiced"] = round(wordtiming.voiced_share(timeline, voicefx.SR, span["start"], span["end"]), 2)
+    return {"words": words, "phrases": wordtiming.phrases(words, script, expected), "extras": extras,
+            "stray": stray}
+
+
+def stray_warnings(timing: dict, trimmed: bool) -> list[str]:
+    """Warnings for sound and words beyond the script (times are in the render)."""
+    out = []
+    stray, extras, words = timing["stray"], timing["extras"], timing["words"]
+
+    def heard_in(span):
+        said = [x["word"] for x in extras if x["end"] > span["start"] - 0.1 and x["start"] < span["end"] + 0.1]
+        return f', heard as "{" ".join(said)}"' if said else ""
+
+    def what(span):  # a pitch means a voice: a hum or an "mmm"; none means a breath or noise
+        return "voiced sound (a hum or an \"mmm\"?)" if span.get("voiced", 0) >= 0.5 else "breath or noise"
+
+    if stray["after"] and not trimmed:
+        a = stray["after"]
+        out.append(f"{a['seconds']:.1f} s of {what(a)} after the last word ({a['start']:.2f}-{a['end']:.2f} s"
+                   f"{heard_in(a)}): listen; --trim-tail cuts it off")
+    if stray["before"]:
+        b = stray["before"]
+        out.append(f"{b['seconds']:.1f} s of {what(b)} before the first word ({b['start']:.2f}-{b['end']:.2f} s"
+                   f"{heard_in(b)}): listen")
+    if words:
+        inside = [x for x in extras if words[0]["start"] <= x["start"] <= words[-1]["end"]]
+        if inside:
+            out.append("heard words that aren't in the script: "
+                       + ", ".join(f'"{x["word"]}" at {x["start"]:.2f} s' for x in inside))
+    return out
 
 
 def _release_cache() -> None:
@@ -770,7 +851,7 @@ def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
 # saved from the page, live in config.local.json (gitignored) and override them.
 REPO_DEFAULTS = {"language": "en", "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED, "cfg_scale": DEFAULT_CFG,
                  "speed": OMNI_DEFAULT_SPEED, "pitch": 0.0, "tempo": 1.0, "reverb": DEFAULT_REVERB,
-                 "blend": 0.0, "double_ms": 0.0, "check": True, "instruction": None}
+                 "blend": 0.0, "double_ms": 0.0, "bass_db": 0.0, "check": True, "instruction": None}
 
 
 class Settings(BaseModel):
@@ -786,6 +867,7 @@ class Settings(BaseModel):
     reverb: Reverb | None = None
     blend: float | None = Field(None, ge=0, le=1)
     double_ms: float | None = Field(None, ge=0, le=voicefx.MAX_DOUBLE_MS)
+    bass_db: float | None = Field(None, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])
     check: bool | None = None
     instruction: str | None = Field(None, max_length=2000)  # English voice description; null = the preset's
 
@@ -842,6 +924,8 @@ class SpeakReq(BaseModel):
     reverb: Reverb = DEFAULT_REVERB  # none / room / hall / cathedral, applied last
     blend: float = Field(0.0, ge=0, le=1)  # share of the human voice mixed under the machine
     double_ms: float = Field(0.0, ge=0, le=voicefx.MAX_DOUBLE_MS)  # with blend: the machine trails by this much
+    bass_db: float = Field(0.0, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])  # shelf under 150 Hz
+    trim_tail: bool | None = None  # True: cut stray sound after the last word (uses Whisper); False: undo
     like: str | None = None  # take id whose dry voice to keep (voice direction / cloning)
     check: bool = True
 
@@ -854,6 +938,8 @@ class FxReq(BaseModel):
     reverb: Reverb = DEFAULT_REVERB
     blend: float = Field(0.0, ge=0, le=1)
     double_ms: float = Field(0.0, ge=0, le=voicefx.MAX_DOUBLE_MS)
+    bass_db: float = Field(0.0, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])
+    trim_tail: bool | None = None  # True: cut stray sound after the last word (uses Whisper); False: undo
     check: bool = True
 
 
@@ -879,7 +965,7 @@ def speak(req: SpeakReq):
     # The language stays the request's own: saved settings never switch an agent's language.
     saved = local_settings()  # read once: a save mid-request can't mix old and new
     opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "blend", "double_ms",
-                         "check"), saved)
+                         "bass_db", "check"), saved)
     try:
         preset = voicefx.load_preset(opt["preset"])
     except FileNotFoundError as exc:
@@ -950,7 +1036,7 @@ def speak(req: SpeakReq):
                                 "missing. Split it into shorter takes (use --like to keep the voice).")
         take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
         res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
-                     opt["blend"], opt["double_ms"])
+                     opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
     heard = f", {res['match']['wet']:.0%} of words heard" if "match" in res else ""
     print(f"[local-voice] {time.strftime('%H:%M:%S')} {req.language} take {tid}: {res['duration_s']}s of audio "
           f"in {gen_s:.1f}s, {opt['preset']}{heard}{' - WARNING' if meta.get('warnings') else ''}", flush=True)
@@ -1014,10 +1100,10 @@ def reset_settings():
 @app.post("/api/fx")
 def refx(req: FxReq):
     meta = load_take(req.id)
-    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "blend", "double_ms", "check"))
+    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "blend", "double_ms", "bass_db", "check"))
     with _lock:
         res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
-                     opt["blend"], opt["double_ms"])
+                     opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
     print(f"[local-voice] {time.strftime('%H:%M:%S')} effects on take {req.id}: {opt['preset']}", flush=True)
     return {**meta, **res}
 

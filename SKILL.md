@@ -141,6 +141,8 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--tempo X` | Time-stretch, 0.5-1.5, same pitch: below 1 is slower. |
 | `--blend X` | Mix the human voice under the machine, 0-1 (0 all machine, 0.5 half and half, 1 all human), sample-aligned: "partly machine, partly human". Works with `--fx`. |
 | `--double MS` | With `--blend`: the machine trails the voice by MS ms, 0-60. 10-30 gives a thicker, doubled texture (it can read as extra reverb); 0, the default, keeps them exactly together. |
+| `--bass DB` | Shelve the bass under 150 Hz, -12..6 dB. Use `-6` when a take warns that the words sit low under the bass. Works with `--fx`. |
+| `--trim-tail` / `--no-trim-tail` | Cut stray sound after the last word (an "mmm", a breath) when a take warns about it; the take remembers the cut for later `--fx` renders. Listen first: the warning says voiced (likely an "mmm") or breath. |
 | `--reverb KIND` | `none` (dry: for a take that will get its own room in a mix), `room` (default), `hall`, `cathedral`. |
 | `--default-voice [TAKE]` | Show the default voice, set it to TAKE (only when the user asks), or `previous` to undo. |
 | `--settings` | Show the defaults in effect: the user may have saved their own (`config.local.json`), which every request without that option uses. Check it before assuming the built-in defaults. |
@@ -235,6 +237,10 @@ lines with `--like`.
   swing it from 0% to 90%. Don't tune presets to a single take's score: compare across 3-4 takes.
 - **The spectrogram:** speech should show clear formant bands and gaps between words. A solid
   wall with no gaps means too much distortion or a vocoder that's smearing.
+- **"The words sit low under the bass":** re-render with `--fx <id> --bass -6`. **"Buried under
+  the bass":** EQ won't save it; regenerate with another seed (keep the voice with `--like`).
+- **"Sound after the last word":** a voiced one is probably a stray "mmm": tell the user, and
+  offer `--fx <id> --trim-tail`. A breath is usually fine.
 - **Word timings** (`words` in the JSON, `_words.json` and `.srt` with `--out`) are on the
   render's own timeline; `"approx": true` marks a word Whisper misheard or missed.
 

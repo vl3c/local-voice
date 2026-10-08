@@ -58,7 +58,8 @@ are two stages:
    with inharmonic "scraped metal" partials and a sub-octave, at a fixed low pitch (F1, 43.65 Hz)
    that follows the voice's intonation only as much as the preset says. When the voice hisses
    (s, sh, f, t) the carrier crossfades to noise, which keeps consonants intelligible. Then
-   brassy distortion, EQ and a metal-tube resonance. The presets are **dry** (no reverb or echo):
+   brassy distortion, EQ (the drone's low end cut 6 dB below 150 Hz, so it doesn't boom over the
+   words) and a metal-tube resonance. The presets are **dry** (no reverb or echo):
    a clean, close voice.
 3. **Finishing (optional, any preset).** `tempo` (time-stretch, same pitch) is applied first,
    together with the preset's own slow-down, as one stretch of the clean voice. `pitch`
@@ -211,6 +212,8 @@ python scripts\say.py --presets
 | `--tempo X` | Time-stretch, 0.5-1.5 (0.85 = slower, same pitch). |
 | `--blend X` | Mix the human voice under the machine, 0-1: 0 all machine, 0.5 half and half (equal loudness), 1 all human. Sample-aligned. |
 | `--double MS` | With `--blend`: the machine trails the voice by MS ms (0-60). 10-30 thickens the two into one doubled voice (it can read as extra reverb); 0, the default, keeps them exactly together. |
+| `--bass DB` | Shelve everything under 150 Hz, -12..6 dB, before loudness matching. -6 when a take warns that the words sit low under the bass. |
+| `--trim-tail` / `--no-trim-tail` | Cut stray sound after the last scripted word (an "mmm", a breath), in the gap after it; the take remembers the cut, so later `--fx` renders keep it. The dry file is untouched; `--no-trim-tail` undoes it. |
 | `--reverb KIND` | `none`, `room` (light; default), `hall` (medium), `cathedral` (heavy). |
 | `--like TAKE` | Keep an earlier take's voice for a new line, in either language, so a scene sounds like one speaker. |
 | `--default-voice [TAKE]` | Show the default voice, set it to TAKE, or `previous` to undo the last change. |
@@ -244,8 +247,8 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
-| `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "check"?}` | the take re-processed |
+| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
+| `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names, descriptions, suggested voice descriptions |
 | `GET /api/health` | | which models are loaded, VRAM |
 | `GET` / `POST /api/default-voice` | `{"id"}` to set | the default voice: source take id, text, median pitch, `previous` |
@@ -276,6 +279,16 @@ Every generation is a *take*, with an id like `20260101-120000-ab12`. Its files 
 | `<id>_fx-...._words.json` / `.srt` | (with `check`) word timings for that render, and its phrases as subtitles |
 | `<id>.json` | text, language, model, instruction, seed, cfg or speed: everything needed to redo it |
 | `<id>_fx-....png` | waveform and spectrogram (with `check`) |
+
+### Warnings a take can carry
+
+- **The words sit low under the bass** (every render): the 300 Hz-4 kHz band, where the words
+  are, measured on the finished take. Clear takes measure about -21 to -23 LUFS; below -25.5 the
+  warning suggests `--bass -6`, below -27 another seed (a take that boomy didn't recover with EQ).
+- **Sound after the last word / before the first** (with `check`): sound outside the script,
+  found in the audio itself (Whisper often doesn't write an "mmm" down), labelled voiced (a hum,
+  an "mmm") or breath/noise. `--trim-tail` cuts a trailing one.
+- **Words heard that aren't in the script** (with `check`).
 
 ### Word timings
 

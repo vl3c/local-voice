@@ -354,14 +354,15 @@ def load_preset(name: str) -> dict:
 
 def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
           reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5,
-          blend: float = 0.0, double_ms: float = 0.0) -> np.ndarray:
+          blend: float = 0.0, double_ms: float = 0.0, bass_db: float = 0.0) -> np.ndarray:
     """Run a preset over mono audio at any rate; returns 48 kHz mono float32 (see apply_layers)."""
-    return apply_layers(audio, sr, preset, pitch, tempo, reverb, target_lufs, tail_s, blend, double_ms)[0]
+    return apply_layers(audio, sr, preset, pitch, tempo, reverb, target_lufs, tail_s, blend, double_ms, bass_db)[0]
 
 
 def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
                  reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5,
-                 blend: float = 0.0, double_ms: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+                 blend: float = 0.0, double_ms: float = 0.0,
+                 bass_db: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """Run a preset over mono audio at any rate: (processed, voice), both 48 kHz mono float32.
 
     Timing is settled first: every `stretch` op in the preset's `pre` chain, and
@@ -373,6 +374,10 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
     blend mixes that voice into the result: 0 = all machine, 0.5 = half and half,
     1 = all voice (see blend_layers). double_ms > 0 lets the machine trail the voice
     by that many ms, a doubling that thickens the blend.
+
+    bass_db shelves everything under BASS_HZ up or down (negative = less bass), on
+    both layers, before loudness normalisation: a take whose words sit low under
+    its bass (see speech_lufs) gets clearer with -3 to -9.
 
     pitch (semitones) applies to the finished sound, after the preset: it moves
     everything down together, the machine's tone and the size of its "throat"
@@ -386,6 +391,8 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
         raise ValueError(f"unknown reverb {reverb!r}; choose from {', '.join(REVERBS)}")
     if not 0.0 <= blend <= 1.0 or not 0.0 <= double_ms <= MAX_DOUBLE_MS:
         raise ValueError(f"blend must be 0-1 and double_ms 0-{MAX_DOUBLE_MS:g}")
+    if not BASS_RANGE[0] <= bass_db <= BASS_RANGE[1]:
+        raise ValueError(f"bass_db must be {BASS_RANGE[0]:g} to {BASS_RANGE[1]:g}")
     voice = timed_voice(audio, sr, preset, tempo, tail_s)
     if not len(voice) or _peak(voice) < SILENCE:
         return np.zeros(len(voice), dtype=np.float32), np.zeros(len(voice), dtype=np.float32)
@@ -405,6 +412,9 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
     if blend:
         y = blend_layers(y, voice, blend, double_ms)
         voice = fit(voice, len(y))
+    if bass_db:
+        shelf = [{"type": "lowshelf", "hz": BASS_HZ, "gain_db": bass_db}]
+        y, voice = op_eq(y, bands=shelf), op_eq(voice, bands=shelf)
     if pitch:
         y = op_pitch(y, semitones=pitch, preserve_formants=False)
         voice = op_pitch(voice, semitones=pitch, preserve_formants=False)
@@ -440,6 +450,22 @@ def stretch_rate(preset: dict, tempo: float = 1.0) -> float:
 
 
 MAX_DOUBLE_MS = 60.0
+BASS_HZ = 150.0
+BASS_RANGE = (-12.0, 6.0)
+
+# Where the words are: 300 Hz-4 kHz. Measured on the finished -16 LUFS take, its
+# loudness says whether the words carry or sit under the bass. Calibrated by ear on
+# the reaper-drone takes of a 39-line film: clear takes measured -20.6 to -23.4,
+# borderline ones -23 to -24.4, and the one judged unintelligible -28.
+SPEECH_BAND = (300.0, 4000.0)
+SPEECH_QUIET_LUFS = -25.5     # below this: warn, suggest less bass
+SPEECH_BURIED_LUFS = -27.0    # below this: the base voice itself is too boomy; another seed
+
+
+def speech_lufs(y: np.ndarray) -> float:
+    """Loudness (LUFS) of the 300 Hz-4 kHz band alone: how loud the words are in a take."""
+    sos = signal.butter(4, [SPEECH_BAND[0] / (SR / 2), SPEECH_BAND[1] / (SR / 2)], "band", output="sos")
+    return loudness(signal.sosfiltfilt(sos, y.astype(np.float64)).astype(np.float32))
 
 
 def blend_layers(machine: np.ndarray, voice: np.ndarray, blend: float, double_ms: float = 0.0) -> np.ndarray:

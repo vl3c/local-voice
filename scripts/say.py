@@ -144,6 +144,12 @@ def main() -> int:
                     "0.5 = half and half, 1 = all voice), sample-aligned; works with --fx too")
     ap.add_argument("--double", type=float, metavar="MS", help="with --blend: let the machine trail the voice by "
                     "MS ms (0-60; 10-30 thickens it into one doubled voice); works with --fx too")
+    ap.add_argument("--bass", type=float, metavar="DB", help="shelve the bass under 150 Hz, -12..6 dB (negative "
+                    "= less: -6 when the words sit low under a boomy voice); works with --fx too")
+    ap.add_argument("--trim-tail", dest="trim_tail", action="store_true", default=None,
+                    help="cut stray sound after the last scripted word (an 'mmm', a breath); remembered by the take, "
+                    "so later --fx renders keep the cut; works with --fx too")
+    ap.add_argument("--no-trim-tail", dest="trim_tail", action="store_false", help="undo a take's --trim-tail")
     ap.add_argument("--seed", help="a number to reproduce a take; 'random' for a new voice "
                     "(default: 74525861)")
     ap.add_argument("--cfg", type=float, help="English only: instruction strength (default 6; Breeze recommends 4)")
@@ -211,13 +217,15 @@ def main() -> int:
     if args.fx:
         res = call("/api/fx", given({"id": args.fx, "preset": args.preset, "check": args.check,
                                      "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
-                                     "blend": args.blend, "double_ms": args.double}))
+                                     "blend": args.blend, "double_ms": args.double, "bass_db": args.bass,
+                                     "trim_tail": args.trim_tail}))
     else:
         body = given({"text": args.text, "instruction": args.instruction, "preset": args.preset,
                       "cfg_scale": args.cfg, "like": args.like,
                       "language": args.lang, "speed": args.speed,
                       "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
-                      "blend": args.blend, "double_ms": args.double, "check": args.check})
+                      "blend": args.blend, "double_ms": args.double, "bass_db": args.bass,
+                      "trim_tail": args.trim_tail, "check": args.check})
         if args.seed is not None:  # omitted: the server's default seed
             body["seed"] = None if args.seed.lower() == "random" else int(args.seed)
         res = call("/api/speak", body)
@@ -228,8 +236,11 @@ def main() -> int:
     else:
         if "id" in res:
             shape = "".join(f"  {k} {res[k]:+g}" if k == "pitch" else f"  {k} {res[k]:g}"
-                            for k, neutral in (("pitch", 0), ("tempo", 1), ("blend", 0), ("double_ms", 0))
+                            for k, neutral in (("pitch", 0), ("tempo", 1), ("blend", 0), ("double_ms", 0),
+                                               ("bass_db", 0))
                             if res.get(k, neutral) != neutral)
+            if res.get("trim_end_s"):
+                shape += f"  cut at {res['trim_end_s']:g} s of the dry take"
             if res.get("reverb", "none") != "none":
                 shape += f"  reverb {res['reverb']}"
             print(f"take {res['id']}  seed {res.get('seed')}  preset {res.get('preset')}{shape}")

@@ -124,6 +124,10 @@
         <label for="double">Double (ms)</label>
         <input id="double" type="number" value="0" min="0" max="60" step="5">
       </div>
+      <div data-tip="Bass under 150 Hz, -12 to +6 dB: negative is less. When a take warns that the words sit low under the bass, -6 usually clears them up. Applied before loudness matching, so the take stays as loud. Re-run effects to try another value without regenerating.">
+        <label for="bass">Bass (dB)</label>
+        <input id="bass" type="number" value="0" min="-12" max="6" step="1">
+      </div>
     </div>
     <div id="presetDesc" class="hint"></div>
 
@@ -142,7 +146,7 @@
     </div>
     <div class="fxbox" data-tip="Your own default settings, kept on this machine (config.local.json). The page starts with them and agents use them for anything they don't specify.">
       <span class="boxlbl head">My defaults</span>
-      <button id="saveSettings" data-tip="Save the panel's current settings (language, preset, seed, strength, speed, pitch, reverb, tempo, blend, double, the check box and a custom English voice description) as your defaults. The page starts with them, and agents use them for anything they don't specify. Stored on this machine in config.local.json, separate from the built-in defaults, which stay untouched. Asks before saving.">Save as my defaults</button>
+      <button id="saveSettings" data-tip="Save the panel's current settings (language, preset, seed, strength, speed, pitch, reverb, tempo, blend, double, bass, the check box and a custom English voice description) as your defaults. The page starts with them, and agents use them for anything they don't specify. Stored on this machine in config.local.json, separate from the built-in defaults, which stay untouched. Asks before saving.">Save as my defaults</button>
       <button id="resetSettings" data-tip="Forget your saved defaults and go back to the built-in ones (reaper-drone, strength 6, seed 74525861, light room). Asks first. Doesn't touch the default voice.">Reset to built-in</button>
     </div>
   </div>
@@ -282,7 +286,7 @@ function applySettings(eff) {
   $("seed").value = eff.seed === null || eff.seed === undefined ? "" : eff.seed;
   $("cfg").value = eff.cfg_scale; $("speed").value = eff.speed;
   $("pitch").value = eff.pitch; $("tempo").value = eff.tempo;
-  $("blend").value = eff.blend ?? 0; $("double").value = eff.double_ms ?? 0;
+  $("blend").value = eff.blend ?? 0; $("double").value = eff.double_ms ?? 0; $("bass").value = eff.bass_db ?? 0;
   $("reverb").value = eff.reverb; $("check").checked = !!eff.check;
   $("instruction").value = eff.instruction || presets[$("preset").value]?.instruction || "";
   showPreset();
@@ -297,11 +301,11 @@ function collectSettings() {
     language: $("lang").value, preset: $("preset").value, seed: seed ? parseInt(seed, 10) : null,
     cfg_scale: parseFloat($("cfg").value), speed: parseFloat($("speed").value),
     pitch: parseFloat($("pitch").value), tempo: parseFloat($("tempo").value),
-    blend: parseFloat($("blend").value), double_ms: parseFloat($("double").value),
+    blend: parseFloat($("blend").value), double_ms: parseFloat($("double").value), bass_db: parseFloat($("bass").value),
     reverb: $("reverb").value, check: $("check").checked, instruction: custom ? desc : null,
   };
   // A cleared number field is left out (it keeps the default), never saved as empty.
-  for (const k of ["cfg_scale", "speed", "pitch", "tempo", "blend", "double_ms"]) if (!Number.isFinite(c[k])) delete c[k];
+  for (const k of ["cfg_scale", "speed", "pitch", "tempo", "blend", "double_ms", "bass_db"]) if (!Number.isFinite(c[k])) delete c[k];
   if (seed && !Number.isFinite(c.seed)) c.seed = null;
   return c;
 }
@@ -311,7 +315,7 @@ function describeSettings(c) {
   return [`Language: ${c.language === "ro" ? "Romanian" : "English"}`, `Preset: ${c.preset}`,
     `Seed: ${c.seed === null ? "random each time" : c.seed}`, `Strength: ${c.cfg_scale ?? "default"}`, `Speed (Romanian): ${c.speed ?? "default"}`,
     `Pitch: ${c.pitch ?? "default"}`, `Tempo: ${c.tempo ?? "default"}`,
-    `Blend (human share): ${c.blend ?? "default"}`, `Double: ${c.double_ms ?? "default"} ms`, `Reverb: ${names[c.reverb] || c.reverb}`,
+    `Blend (human share): ${c.blend ?? "default"}`, `Double: ${c.double_ms ?? "default"} ms`, `Bass: ${c.bass_db ?? "default"} dB`, `Reverb: ${names[c.reverb] || c.reverb}`,
     `Transcribe + spectrogram: ${c.check ? "on" : "off"}`,
     `Voice description: ${c.instruction ? "your own (\"" + c.instruction.slice(0, 60) + (c.instruction.length > 60 ? "…" : "") + "\")" : "the preset's"}`].join("\n");
 }
@@ -357,7 +361,7 @@ function renderTake(res, autoplay) {
   const box = el("div", {class: "take"});
   const lang = res.language || "en";
   box.append(el("div", {class: "meta", tip: "Take id · language · seed · preset · length · generation time. The id is what --like and --fx take on the command line."},
-    `${res.id} · ${lang} · seed ${res.seed} · ${res.preset}${res.pitch ? ` · pitch ${res.pitch > 0 ? "+" : ""}${res.pitch}` : ""}${res.tempo && res.tempo !== 1 ? ` · tempo ${res.tempo}` : ""}${res.blend ? ` · blend ${res.blend}${res.double_ms ? ` double ${res.double_ms} ms` : ""}` : ""}${res.reverb && res.reverb !== "none" ? ` · ${res.reverb}` : ""} · ${res.duration_s}s · gen ${res.gen_s ?? "-"}s`));
+    `${res.id} · ${lang} · seed ${res.seed} · ${res.preset}${res.pitch ? ` · pitch ${res.pitch > 0 ? "+" : ""}${res.pitch}` : ""}${res.tempo && res.tempo !== 1 ? ` · tempo ${res.tempo}` : ""}${res.blend ? ` · blend ${res.blend}${res.double_ms ? ` double ${res.double_ms} ms` : ""}` : ""}${res.bass_db ? ` · bass ${res.bass_db > 0 ? "+" : ""}${res.bass_db} dB` : ""}${res.trim_end_s ? " · tail cut" : ""}${res.reverb && res.reverb !== "none" ? ` · ${res.reverb}` : ""} · ${res.duration_s}s · gen ${res.gen_s ?? "-"}s`));
   box.append(el("div", {class: "said"}, res.text));
   if (res.instruction) box.append(el("div", {class: "meta", tip: "The voice description used for this take."}, "voice: " + res.instruction));
   else if (res.default_voice) box.append(el("div", {class: "meta", tip: "This Romanian take cloned the default voice."}, "voice: default voice (take " + res.like + ")"));
@@ -404,23 +408,35 @@ function renderTake(res, autoplay) {
     tip: "Blend for the re-run: the human voice's share under the machine, 0-1."});
   const doubleIn = el("input", {type: "number", value: res.double_ms ?? 0, min: 0, max: 60, step: 5, class: "small",
     tip: "Double for the re-run, with Blend: the machine trails the voice by this many ms (10-30 thickens)."});
+  const bassIn = el("input", {type: "number", value: res.bass_db ?? 0, min: -12, max: 6, step: 1, class: "small",
+    tip: "Bass under 150 Hz for the re-run, dB: -6 when the words sit low under the bass."});
   const revIn = el("select", {class: "small", tip: "Reverb for the re-run."});
   revIn.innerHTML = '<option value="none">None</option><option value="room">Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option>';
   revIn.value = res.reverb || "none";
-  const rerun = el("button", {class: "rerun", tip: "Apply the chosen preset, pitch, tempo, blend and reverb to this same performance in a second or two, without regenerating. Adds a new card, so you can compare.",
-    onclick: async () => {
-      setBusy(true, "Re-applying effects…");
-      try {
-        renderTake(await api("/api/fx", {id: res.id, preset: sel.value, check: $("check").checked,
-          pitch: parseFloat(pitchIn.value) || 0, tempo: parseFloat(tempoIn.value) || 1, reverb: revIn.value,
-          blend: parseFloat(blendIn.value) || 0, double_ms: parseFloat(doubleIn.value) || 0}), true);
-        setBusy(false);
-      } catch (e) { setBusy(false, "Error: " + e.message); }
-    }}, "Re-run effects");
+  const rerunWith = async (extra, busy) => {
+    setBusy(true, busy);
+    try {
+      renderTake(await api("/api/fx", {id: res.id, preset: sel.value, check: $("check").checked,
+        pitch: parseFloat(pitchIn.value) || 0, tempo: parseFloat(tempoIn.value) || 1, reverb: revIn.value,
+        blend: parseFloat(blendIn.value) || 0, double_ms: parseFloat(doubleIn.value) || 0,
+        bass_db: parseFloat(bassIn.value) || 0, ...extra}), true);
+      setBusy(false);
+    } catch (e) { setBusy(false, "Error: " + e.message); }
+  };
+  const rerun = el("button", {class: "rerun", tip: "Apply the chosen preset, pitch, tempo, blend, bass and reverb to this same performance in a second or two, without regenerating. Adds a new card, so you can compare.",
+    onclick: () => rerunWith({}, "Re-applying effects…")}, "Re-run effects");
+  // Stray sound after the last word (an "mmm", a breath): cut it, or undo a cut. The take remembers.
+  const strayTail = (res.warnings || []).some(w => w.includes("after the last word"));
+  const tailBtn = res.trim_end_s
+    ? el("button", {tip: "This take is cut just after its last word. Undo the cut and re-run with the settings on the left.",
+        onclick: () => rerunWith({trim_tail: false}, "Undoing the tail cut…")}, "Undo tail cut")
+    : strayTail ? el("button", {tip: "Cut the stray sound after the last word, in the gap before it, and re-run with the settings on the left. The take remembers the cut, so later re-runs keep it; the dry recording itself is untouched.",
+        onclick: () => rerunWith({trim_tail: true}, "Cutting the stray tail…")}, "Cut stray tail") : null;
   const fxbox = el("div", {class: "fxbox"}, el("span", {class: "boxlbl head"}, "Effects"), sel,
     el("span", {class: "boxlbl"}, "pitch"), pitchIn, el("span", {class: "boxlbl"}, "tempo"), tempoIn,
     el("span", {class: "boxlbl"}, "blend"), blendIn, el("span", {class: "boxlbl"}, "double"), doubleIn,
-    el("span", {class: "boxlbl"}, "reverb"), revIn, rerun);
+    el("span", {class: "boxlbl"}, "bass"), bassIn,
+    el("span", {class: "boxlbl"}, "reverb"), revIn, rerun, tailBtn);
 
   const voiceBox = el("div", {class: "fxbox"}, el("span", {class: "boxlbl head"}, "Voice"),
     el("button", {tip: "Clone this take's voice for the lines you make next: the model listens to this take's raw recording and speaks your new text in that same voice (same depth, rasp and pacing), in English or Romanian. Effects are applied fresh, so you can still change preset, pitch and reverb. It lasts while the 'Clone voice of take' box above is ticked; untick it to go back to designing the voice from the description. Only this page uses it: the default voice is unchanged.",
@@ -436,7 +452,7 @@ function renderTake(res, autoplay) {
         $("instruction").value = res.instruction || "";
         if (res.speed) $("speed").value = res.speed;
         $("pitch").value = res.pitch ?? 0; $("tempo").value = res.tempo ?? 1; $("reverb").value = res.reverb || "none";
-        $("blend").value = res.blend ?? 0; $("double").value = res.double_ms ?? 0;
+        $("blend").value = res.blend ?? 0; $("double").value = res.double_ms ?? 0; $("bass").value = res.bass_db ?? 0;
         if (res.cfg_scale) $("cfg").value = res.cfg_scale;
       }}, "Load settings"));
   box.append(el("div", {class: "bottom"}, fxbox, voiceBox, settingsBox));
@@ -454,6 +470,7 @@ $("go").addEventListener("click", async () => {
     seed: seed ? parseInt(seed, 10) : null, like: $("useLike").checked ? likeTake : null, check: $("check").checked,
     pitch: parseFloat($("pitch").value) || 0, tempo: parseFloat($("tempo").value) || 1, reverb: $("reverb").value,
     blend: parseFloat($("blend").value) || 0, double_ms: parseFloat($("double").value) || 0,
+    bass_db: parseFloat($("bass").value) || 0,
   };
   // Keeping a voice with the stock description would steer away from it: send none, for a pure clone.
   if (body.like && stockDescriptions().includes(body.instruction.trim())) body.instruction = null;

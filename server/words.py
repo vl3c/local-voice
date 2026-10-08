@@ -235,3 +235,48 @@ def srt(cues: list[dict]) -> str:
         return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
     return "".join(f"{i}\n{ts(c['start'])} --> {ts(c['end'])}\n{c['text']}\n\n" for i, c in enumerate(cues, 1))
 
+
+STRAY_MIN_S = 0.15    # this much sound beyond the script counts as a stray vocalization
+STRAY_MARGIN_S = 0.12  # ignore sound this close to the first/last word: its own breath and decay
+TRIM_PAD_S = 0.15      # a trim keeps at most this much after the last word
+
+
+def stray_sound(words: list[dict], active: np.ndarray) -> dict:
+    """Sound outside the script: before the first word or after the last.
+
+    {"before": {...} | None, "after": {...} | None}, each {"start", "end", "seconds"};
+    "after" also has "cut": where to end the take to drop it (in the gap after the
+    last word, at most TRIM_PAD_S past it). Whisper often doesn't write a hum or an
+    "mmm" down at all, so this looks at the sound itself, not the transcript.
+    """
+    out = {"before": None, "after": None}
+    if not words or not len(active):
+        return out
+    n, need = len(active), int(round(STRAY_MIN_S / FRAME_S))
+    first = int((words[0]["start"] - STRAY_MARGIN_S) / FRAME_S)
+    last = int(np.ceil((words[-1]["end"] + STRAY_MARGIN_S) / FRAME_S))
+    if first > 0 and active[:first].sum() >= need:
+        k = np.flatnonzero(active[:first])
+        out["before"] = _span(k[0], k[-1], active[:first].sum())
+    if last < n and active[last:].sum() >= need:
+        k = last + np.flatnonzero(active[last:])
+        span = _span(k[0], k[-1], active[last:].sum())
+        gap = span["start"] - words[-1]["end"]
+        span["cut"] = round(words[-1]["end"] + min(TRIM_PAD_S, gap / 2), 3)
+        out["after"] = span
+    return out
+
+
+def voiced_share(audio: np.ndarray, sr: int, start: float, end: float) -> float:
+    """How much of [start, end] has a pitch: a hum or an "mmm" is voiced, a breath isn't."""
+    import parselmouth
+    seg = audio[int(start * sr):int(end * sr)].astype(np.float64)
+    if len(seg) < int(0.05 * sr):
+        return 0.0
+    f = parselmouth.Sound(seg, sampling_frequency=sr).to_pitch(
+        time_step=0.01, pitch_floor=40, pitch_ceiling=500).selected_array["frequency"]
+    return float(np.mean(f > 0)) if len(f) else 0.0
+
+
+def _span(k0: int, k1: int, frames: int) -> dict:
+    return {"start": round(k0 * FRAME_S, 3), "end": round((k1 + 1) * FRAME_S, 3), "seconds": round(frames * FRAME_S, 2)}

@@ -68,8 +68,8 @@
       "bands": [
         {
           "type": "lowshelf",
-          "hz": 90,
-          "gain_db": 6
+          "hz": 150,
+          "gain_db": -6
         },
         {
           "type": "peak",

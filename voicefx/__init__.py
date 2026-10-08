@@ -1,4 +1,4 @@
 """Sound-design effects for local-voice. See fx.py."""
 
-from .fx import (MAX_DOUBLE_MS, REVERBS, SR, apply, apply_layers, list_presets, load_preset,  # noqa: F401
-                 stretch_rate, timed_voice)
+from .fx import (BASS_RANGE, MAX_DOUBLE_MS, REVERBS, SPEECH_BURIED_LUFS, SPEECH_QUIET_LUFS, SR,  # noqa: F401
+                 apply, apply_layers, list_presets, load_preset, speech_lufs, stretch_rate, timed_voice)
