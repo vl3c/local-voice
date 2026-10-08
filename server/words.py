@@ -18,7 +18,7 @@ import numpy as np
 # Romanian is written with both comma-below (ș ț, correct) and cedilla (ş ţ, legacy)
 # letters; Whisper uses either. Compare them as equal.
 FOLD = str.maketrans({"ş": "ș", "ţ": "ț", "Ş": "ș", "Ţ": "ț"})
-TOKEN = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
+WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 EVENT = re.compile(r"\([^)]*\)")  # vocal events in the script, like (sigh): not words
 PUNCT_BREAK = re.compile(r"[.,;:!?…—–]")
 
@@ -32,7 +32,7 @@ PHRASE_MAX_WORDS = 12
 
 def tokens(s: str) -> list[str]:
     """Lower-case words, vocal events like (sigh) dropped: how texts are compared."""
-    return TOKEN.findall(EVENT.sub(" ", s.lower().translate(FOLD)))
+    return WORD.findall(EVENT.sub(" ", s.lower().translate(FOLD)))
 
 
 def script_words(text: str) -> list[dict]:
@@ -42,7 +42,7 @@ def script_words(text: str) -> list[dict]:
     if len(folded) != len(text):  # a rare letter whose lower case is longer: no positions
         return [{"word": w, "norm": w, "pos": None} for w in tokens(text)]
     return [{"word": text[m.start():m.end()], "norm": m.group(), "pos": (m.start(), m.end())}
-            for m in TOKEN.finditer(folded)]
+            for m in WORD.finditer(folded)]
 
 
 def heard_words(chunks: list[dict], normalise=lambda s: s) -> list[tuple[str, float, float]]:

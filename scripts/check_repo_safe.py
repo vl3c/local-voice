@@ -61,9 +61,11 @@ PATTERNS = [
     ("Slack token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
     ("JWT", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
-    # Quoted OR bare assignment - a real .env uses KEY=value with no quotes.
+    # Quoted OR bare assignment - a real .env uses KEY=value with no quotes. A function
+    # call (TOKEN = re.compile(...)) computes its value: it isn't a stored secret.
     ("secret assignment", re.compile(
         r"(?i)\b(?:api[_-]?key|secret|token|password|passwd|credential)\b\s*[:=]\s*"
+        r"(?![A-Za-z_][\w.]*\()"
         r"(?:['\"][^'\"\n]{8,}['\"]|[^\s'\"#][^\s'\"#]{7,})")),
 ]
 
