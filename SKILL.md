@@ -1,18 +1,25 @@
 ---
 name: local-voice
-description: Generate speech locally in English (Breeze TTS 2 voice design: describe the voice and mood in words) or Romanian (OmniVoice, correct diacritics) on this machine's GPU, then turn it into a machine with vocoder-based sound-design presets (Mass Effect Reaper / Harbinger style), check every take with Whisper and a spectrogram, and deliver the keepers to a folder the user names, or play them on the user's speakers. Use when the user asks for local TTS, local voice generation, a Reaper or other non-human / monster / machine voice, or wants speech made without a cloud service.
+description: Generate speech locally in English (Breeze TTS 2 voice design: describe the voice and mood in words) or Romanian (OmniVoice, correct diacritics) on this machine's GPU, with built-in voices (ancient male or female, young woman, child, old man, vampires), then turn it into a machine with vocoder-based sound-design presets (Mass Effect Reaper / Harbinger style) or a creature (ship's AI, AI choir, ghost, hive, droid), check every take with Whisper and a spectrogram, with word timings and subtitles, and deliver the keepers to a folder the user names, or play them on the user's speakers. Use when the user asks for local TTS, local voice generation, a Reaper or other non-human / monster / machine voice, or wants speech made without a cloud service.
 ---
 
 # local-voice: voice-design TTS + non-human effects on the local GPU
 
-The model makes a **human** voice: Breeze TTS 2 (English) from a written description like
-"ancient male, massive scale, deep resonant bass, subterranean, slow and cold"; OmniVoice
-(Romanian) by cloning the "default voice" (a deep English take) by default, or from attributes like
-"male, elderly, very low pitch". No open model makes a truly
-non-human voice by itself, so the presets replace the voice with a machine: a vocoder lays its
-articulation over a synthetic brass tone at a fixed low pitch, then distortion, metal resonance
-and EQ. The presets add no reverb or echo: clean, close voices, with the room added later. The
-delivery (pace, pauses, emphasis) still comes from the model.
+Two independent choices make a take: **who speaks** (a voice) and **what processes it** (a preset).
+
+- **Voices.** The model makes a *human* voice: Breeze TTS 2 (English) from a written
+  description, OmniVoice (Romanian) by cloning a stored English take of that voice. Built-in
+  voices (`--voice`) are a description plus a seed picked by ear: `ancient-male` (the Reaper,
+  default), `ancient-female`, `young-woman`, `child`, `old-frail`, `vampire-male`,
+  `vampire-female`. Or write your own description (`--instruction`).
+- **Presets.** No open model makes a truly non-human voice by itself, so the machine presets
+  replace the voice: a vocoder lays its articulation over a synthetic brass tone at a fixed low
+  pitch, then distortion, metal resonance and EQ. The creature presets (`synthetic-ai`,
+  `ai-choir`, `wraith`, `hive`, `droid`) keep more of the person. `--blend` mixes the human voice
+  back under any of them.
+
+The delivery (pace, pauses, emphasis) always comes from the model. A light room is added by
+default (`--reverb`).
 
 ## Quick start
 
@@ -44,8 +51,9 @@ only judge of how it *sounds*: send them the files early and let them steer.
    for options, one take is enough. For alternatives, add `--seed random` for 2-3 more (step 2).
 3. **Read** the transcripts: wet below ~85% of words means the effects are burying the speech.
    Open the spectrogram PNG with Read if something looks odd.
-4. **Iterate:** another seed (the base voice varies a lot between seeds), a different
-   `--instruction`, another preset, or `--fx` to re-run effects on a take without regenerating.
+4. **Iterate:** another seed (the base voice varies a lot between seeds), another `--voice` or
+   `--instruction`, another preset, `--blend`, or `--fx` to re-run effects on a take without
+   regenerating.
 5. **Deliver** the keeper without regenerating it: `say.py --fx <take id> --no-check --out <dir>`
    (add `--format mp3` for WhatsApp and other messengers: just the MP3). `--out` creates the folder.
    Then send the files (SendUserFile if you have it; otherwise give the paths).
@@ -135,7 +143,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 |---|---|
 | `--preset NAME` | Effects preset (default `reaper-drone`). `--presets` lists them. See the table below. |
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
-| `--voice NAME` | Who speaks, independent of the preset: `ancient-male` (default, the Reaper), `ancient-female`, `young-woman`, `child`, `old-frail` (`--voices` describes them). Each brings its own description and seed. In Romanian, a clone of that voice. |
+| `--voice NAME` | Who speaks, independent of the preset: `ancient-male` (default, the Reaper), `ancient-female`, `young-woman`, `child`, `old-frail`, `vampire-male`, `vampire-female` (`--voices` describes them). Each brings its own description and seed. In Romanian, a clone of that voice. |
 | `--instruction "..."` | Your own voice description instead of `--voice`. English: free text (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the chosen voice; or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
 | `--seed N` | Reproduces a take exactly. Default: the voice's own seed; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
 | `--cfg X` | English only: how hard the model follows the instruction (default 6, the default style; Breeze recommends 4; 0.5-10; much above 6 can sound forced). |
@@ -150,7 +158,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--default-voice [TAKE]` | Show what Romanian lines clone for `--voice` (default `ancient-male`: the default voice), set it to TAKE (only when the user asks), or `previous` to undo. |
 | `--settings` | Show the defaults in effect: the user may have saved their own (`config.local.json`), which every request without that option uses. Check it before assuming the built-in defaults. |
 | `--like TAKE` | Keep an earlier take's voice for a new line: use it for multi-line scenes so every line sounds like the same Reaper. Works across languages: Romanian lines can clone an English take's voice (and the reverse). |
-| `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
+| `--fx TAKE` | Re-run effects (preset, pitch, tempo, blend, bass, reverb, tail cut) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
 | `--check` / `--no-check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. **On by default**; `--no-check` saves ~1 s when you don't need it. |
 | `--out DIR` / `--name STEM` | Copy the take to DIR (created if needed; never overwrites). Works with `--fx` to export an existing take. |
 | `--format F` | With `--out`: `both` (default: processed WAV + MP3, the voice stem WAV and the dry WAV), `wav` (the same without the MP3) or `mp3` (just the processed MP3). **WhatsApp and most messengers reject WAV**: use `mp3` for those. |
@@ -169,7 +177,18 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `reaper` | the same machine, loosely following the voice's intonation |
 | `harbinger` | a synth chord snapping to semitones, ring-mod shimmer, heavy distortion |
 | `demon` | organic and monstrous rather than mechanical: a demon more than a machine |
-| `dry` | the base voice, no effects |
+| `dry` | the base voice, no effects (and the vampires, which are meant to be heard as they are) |
+
+**Creatures** (tuned by ear with the voice that suits them; offer them when the user wants
+something other than a machine):
+
+| Preset | Use it for | Voice |
+|---|---|---|
+| `synthetic-ai` | a ship's AI: clear human voice, metallic sheen, digital shimmer | any |
+| `ai-choir` | an AI choir: airy voice over deep layers and a bouncing echo (stereo) | `ancient-female`, `young-woman` |
+| `wraith` | a ghost speaking in breath, arriving on a swoosh | `old-frail`, `--reverb room` |
+| `hive` | a crowd speaking as one, with an insect buzz | deep voices; `--blend 0.3` on high ones |
+| `droid` | a small, cute robot | `child`; `--blend 0.9` on adults |
 
 **Loudness:** every processed take is normalised to -16 LUFS (peaks under -1 dBFS), so presets
 and settings can be compared, and clips cut together, without volume jumps.
@@ -196,15 +215,18 @@ lines with `--like`.
 
 ## Romanian
 
-- **Romanian clones the chosen voice by default** (no `--instruction`, no `--like`): an English
-  Breeze take of that voice, made automatically on its first Romanian line (~30 s once for the
-  deep `ancient-male` default voice, ~65 Hz) and stored as a copy in `voices/` (safe from
-  clearing `output/`). `--voice ancient-female --lang ro` speaks Romanian as the ancient female. Why: OmniVoice's own "very low pitch" lands around
-  100-130 Hz, which sounds too small next to the English takes. `--default-voice`
-  shows it; `--default-voice <take>` sets it (pick a deep English take). Only design Romanian
-  voices from attributes if the user wants a different voice, and say it will sound higher.
-- **Whisper can't hear an accent.** A cloned English voice might carry English colouring into
-  Romanian; tell the user to listen for it, and offer attribute-designed Romanian as the alternative.
+- **Romanian speaks as the chosen voice** (no `--instruction`, no `--like`): it clones a stored
+  take of that voice, made automatically on its first Romanian line and kept in `voices/` (safe
+  from clearing `output/`). `--voice vampire-female --lang ro` speaks Romanian as the female
+  vampire. For most voices that stored take is English: cloning keeps the voice's depth and
+  delivery (OmniVoice's own deepest design lands around 100-130 Hz, too small next to the
+  English takes). For `ancient-male` it's the deep **default voice** (~65 Hz, found by a search
+  the first time, ~30 s once); `--default-voice` shows it and `--default-voice <take>` replaces it.
+- **Accent.** A clone keeps its English take's accent. It's fine for most voices (by ear: the
+  ancient female and both vampires), but clear on `young-woman`, so hers is a **native Romanian**
+  take designed from attributes (`"romanian"` in `server/voices.json`). Whisper can't hear an
+  accent: if the user hears English colouring in a voice's Romanian, offer the same fix (pick
+  attributes and a seed by ear with them; native voices sound higher than the clones).
 - **Sentence by sentence, verified:** the server generates Romanian one sentence at a time,
   transcribes each, and regenerates any sentence with missing words (up to 3 tries), because
   OmniVoice otherwise drops words, especially in long inputs. The response's `sentences` lists
@@ -214,11 +236,13 @@ lines with `--like`.
   times ("10:30") are spelled out in Romanian automatically and cedilla letters (ş ţ) are fixed;
   abbreviations aren't expanded, so write them out. Stress errors don't show in transcripts either: if the user reports a wrong
   stress, rephrase or try another seed.
-- The Romanian engine starts on the first Romanian request (~20 s, plus ~10 s once to make the
-  default voice), then ~1-1.5 s a sentence.
+- The Romanian engine starts on the first Romanian request (~20 s, plus ~10-30 s once to make
+  a voice's stored take), then ~1-1.5 s a sentence.
 
-## 3. Write the voice description
+## 3. Choose or write the voice
 
+- **Start from a built-in voice** (`--voice`, `--voices` lists them): each has a seed picked by
+  ear. Write your own description only when none fits, then try a few seeds.
 - **Describe a person's voice and delivery**, in English: age, size, timbre, pitch, pace, emotion,
   attitude. Breeze is trained on human speech, so "robotic" or "inhuman" mostly read as
   flat and cold. Leave the inhuman part to the presets.
@@ -272,8 +296,10 @@ does everything the CLI does.
 ## Tuning presets
 
 Presets are JSON in `voicefx/presets/`: `pre` chain, parallel `buses` mixed at `gain_db`, `post`
-chain. The vocoder's knobs (`f0`, `follow`, `steps`, `chord`, `metal`, `sub`) are documented in
-`op_vocoder`; other ops are in `voicefx/fx.py` (`OPS`). Preset names must be letters, digits,
+chain. The vocoder's knobs (`f0`, `follow`, `steps`, `chord`, `metal`, `sub`, `tone`) are documented
+in `op_vocoder`; other ops are in `voicefx/fx.py` (`OPS`), including the creature ones (`swarm`,
+`echo`, `preverb`, `arrive`, `crush`). A bus with `"stereo_echo"` makes the take stereo. Keep a
+`stretch` op first in `pre` (it is run first anyway, with the tempo) so the voice stem stays aligned. Preset names must be letters, digits,
 `-` or `_`. Name experiments `_something.json`: git ignores them. Edit or add one, then re-run
 effects on existing takes with `--fx`: no restart needed, since presets are read on every request
 (changes to `fx.py` itself need a server restart). After changing code, run the tests:

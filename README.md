@@ -93,9 +93,12 @@ picked by ear:
 | `young-woman` | Calm and clear (~190 Hz); lovely blended half machine, half human. |
 | `child` | An eerily calm child (~285 Hz). |
 | `old-frail` | A frail, breathy old man (~100 Hz). |
+| `vampire-male` | Velvety and intimate (~100 Hz): seductive, with a quiet, hypnotic menace. |
+| `vampire-female` | Low, husky and close (~175 Hz): the same, as a woman. |
 
 Or write your own description (`instruction`) instead. Add a voice by adding an entry to
-`server/voices.json`: a description and a seed whose voice you like.
+`server/voices.json`: a description and a seed whose voice you like. A voice can also carry
+`"romanian": {"attributes", "seed"}` (see below).
 
 ### Two engines, one voice
 
@@ -124,7 +127,10 @@ near 65 Hz. So by default Romanian lines **clone an English take of the chosen v
 `voices\` (safe from clearing `output\`) and made on first use: for `ancient-male`, the
 **default voice**, Breeze tries its own seeds until the voice lands under 75 Hz (seed 12 gives
 ~65 Hz); for any other voice, one take from its description and seed. Cloned Romanian keeps that
-depth (66-69 Hz measured) and Whisper still transcribes it perfectly. Replace a voice's clone
+depth (66-69 Hz measured) and Whisper still transcribes it perfectly. A clone also keeps the
+English accent of the take it copies, which shows on some voices: `young-woman` got a **native
+Romanian** voice instead, one OmniVoice take designed from attributes (`female, young adult,
+very low pitch`, seed 12) that her Romanian lines clone. Replace a voice's clone
 with **Set as Romanian voice** on any take (for the voice selected), or
 `say.py --default-voice <take> [--voice NAME]`. Whisper can't judge accent, so listen for
 English colouring in cloned Romanian.
@@ -142,9 +148,25 @@ Breeze keeps the voice but steers its delivery ("voice direction").
 | `reaper` | Like `reaper-drone`, but loosely following the voice's intonation. |
 | `harbinger` | A machine imitating speech: a synth chord (root, fifth, octave) follows the intonation but snaps to whole semitones, with ring-mod shimmer and heavy distortion. |
 | `demon` | The human voice pitched down and distorted, with octave and sub layers: monstrous rather than mechanical. |
-| `dry` | No effects, for judging the base voice. |
+| `dry` | No effects, for judging the base voice (and for voices meant to be heard as they are, like the vampires). |
 
 All of them transcribe at 100% of words with Whisper on four test takes (`demon`: 88% on one).
+
+**Creatures.** Not machines, but other things that speak; each was tuned by ear, and the voice it
+suits best is part of the recipe:
+
+| Preset | Character | Best with |
+|---|---|---|
+| `synthetic-ai` | A ship's AI: the real voice, smooth and close, with a short metallic flanger, a high digital shimmer and light bit-crush. Processed, never mechanical. | any voice |
+| `ai-choir` | An AI choir, after a reference clip: an airy voice over quiet layers in other registers and a deep three-voice shadow, a muffled echo every 0.5 s, and the deep voice echoing back, bouncing left and right. **Stereo.** | `ancient-female`, `young-woman` |
+| `wraith` | A ghost: the words spoken in breath over a faint, dark voice; each phrase arrives on a rising swoosh and swells out of its own reversed echo. | `old-frail`, in a `room` |
+| `hive` | Many as one: the voice as a crowd (detuned copies, octaves below and above) with an insect buzz. | deep voices; `--blend 0.3` on high ones |
+| `droid` | A small robot: pitched up, a stepped synth voice, crushed to lo-fi bits, a beep tone. | `child`; `--blend 0.9` on adults |
+
+**Stereo.** A bus with `"stereo_echo"` (as in `ai-choir`) bounces left and right behind the
+voice and makes the take stereo: the WAV and MP3 are two-channel, loudness is measured across
+both, and the check transcribes a mono fold. Everything else stays mono, and the voice stem and
+word timings are mono on the same timeline.
 
 **Dark voices are brightened for the machine.** The presets were tuned on deep male voices,
 which have plenty of energy at 1-4 kHz, where consonants and formants are. A darker voice (a
@@ -156,9 +178,11 @@ alone; the voice stem and the `dry` preset are never changed. The take reports
 
 Add your own by copying a JSON file in `voicefx/presets/`. A preset is a `pre` chain, parallel
 `buses` mixed at `gain_db`, and a `post` chain. Every op and its parameters are listed in
-`voicefx/fx.py` (`OPS`, `op_vocoder`). The vocoder's main knobs are `f0` (the machine's pitch),
-`follow` (0 = monotone, 1 = full intonation), `steps` (snap to semitones), `chord`, `metal` and
-`sub`. Presets are re-read on every request, and re-running effects on an existing take takes a
+`voicefx/fx.py` (`OPS`, `op_vocoder`). The vocoder's main knobs are `f0` (the machine's pitch, or
+`"voice"` for the speaker's own), `follow` (0 = monotone, 1 = full intonation), `steps` (snap to
+semitones), `chord`, `metal`, `sub` and `tone` (0 = breath only, a whisper). The creature ops:
+`swarm` (a crowd of pitched, shifted copies), `echo` (muffled repeats), `preverb` (reverse
+reverb), `arrive` (a swoosh into each phrase) and `crush` (bit-crush). Presets are re-read on every request, and re-running effects on an existing take takes a
 second or two with no regeneration. Name scratch presets `_something.json` and git ignores them.
 
 ## Requirements
@@ -407,6 +431,8 @@ models.json                          pinned, checksummed weight manifest
 requirements.txt, requirements-ro.txt  the two venvs' dependencies
 server/app.py, server/page.html      the loopback server and its one-page UI
 server/omni_worker.py, textnorm.py   the Romanian engine (run in .venv-ro), its text normaliser
+server/voices.json                   the built-in voices (who speaks)
+server/words.py                      word timings, phrases and subtitles, stray-sound detection
 voicefx/fx.py, presets/              the effects engine and presets
 scripts/say.py                       CLI (standard library only)
 scripts/download_models.py           resumable, verifying downloader

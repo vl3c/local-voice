@@ -72,7 +72,10 @@ skill's own folder with `..`: the skills are links, and `..` resolves to the wro
 
 That's all. Every other setting (voice, preset, strength, seed, reverb) comes from the user's saved
 defaults or the built-in ones. Don't override them unless the user asks: "say it in the harbinger
-voice" means `--preset harbinger`; "lower" means `--pitch -3`; "slower" means `--tempo 0.85`.
+voice" means `--preset harbinger`; "as a woman" means `--voice ancient-female` (or `young-woman`
+for a natural one); "as a ghost" means `--voice old-frail --preset wraith`; "as a vampire" means
+`--voice vampire-male --preset dry` (or `vampire-female`); "lower" means `--pitch -3`; "slower"
+means `--tempo 0.85`. `--voices` and `--presets` list the rest.
 `python ~/.claude/skills/local-voice/scripts/say.py --settings` shows what's in effect.
 
 ## Writing for the ear
@@ -91,8 +94,10 @@ voice" means `--preset harbinger`; "lower" means `--pitch -3`; "slower" means `-
 ## When you're done
 
 Leave the server running: it keeps the voice ready, so the next line takes seconds. It does hold
-the GPU (10-14 GB), which blocks the local-agent and local-image servers. If the user switches to
-one of those, offer to stop the voice:
+the GPU (10-14 GB), which blocks the local-agent and local-image servers; after 15 idle minutes it
+lets go by itself (standby) and reloads in ~20 s on the next line. To free the GPU now without
+stopping it: `python ~/.claude/skills/local-voice/scripts/say.py --unload`. If the user is done
+with voice, offer to stop it:
 
 ```bash
 cmd //c "$(cygpath -w ~/.claude/skills/local-voice/stop.cmd)"
