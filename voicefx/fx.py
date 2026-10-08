@@ -420,7 +420,7 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
 def timed_voice(audio: np.ndarray, sr: int, preset: dict, tempo: float = 1.0, tail_s: float = 2.5) -> np.ndarray:
     """The clean voice on a render's timeline: 48 kHz, peak 0.5, stretched by the preset's
     `stretch` ops and tempo, before any effect. Sample 0 is the render's sample 0, so a
-    time measured on this is a time in the render."""
+    time measured on this is a time in the render (word timings are measured here)."""
     x = np.nan_to_num(np.asarray(audio, dtype=np.float32).reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
     if not len(x):
         return x

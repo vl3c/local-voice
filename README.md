@@ -244,7 +244,7 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice, spectrogram), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
+| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names, descriptions, suggested voice descriptions |
 | `GET /api/health` | | which models are loaded, VRAM |
@@ -273,8 +273,22 @@ Every generation is a *take*, with an id like `20260101-120000-ab12`. Its files 
 | `<id>_dry.wav` | the voice as generated, 24 kHz (Breeze or OmniVoice) |
 | `<id>_fx-<preset>[_pitch-4][_tempo0.85][_hall].wav` / `.mp3` | processed, 48 kHz; one pair per combination of effect settings |
 | `<id>_fx-...._voice.wav` | the human voice under that render: sample-aligned, same tempo, pitch, reverb, length and loudness |
+| `<id>_fx-...._words.json` / `.srt` | (with `check`) word timings for that render, and its phrases as subtitles |
 | `<id>.json` | text, language, model, instruction, seed, cfg or speed: everything needed to redo it |
 | `<id>_fx-....png` | waveform and spectrogram (with `check`) |
+
+### Word timings
+
+With `check` on, every render also gets `..._words.json`: when each word of the script starts and
+ends in that render, in seconds, for cueing animation to the words. It's measured on the clean
+voice on the render's own timeline (so tempo and the presets' slow-down are already in it):
+Whisper's word times, matched to the script (numbers spelled out), then each boundary moved into
+the pause between two words where there is one, and each edge snapped to where the sound starts
+or stops. Across a pause that's accurate to about 10 ms; between words spoken together it's
+Whisper's own boundary, usually within a few tens of ms. A word Whisper misheard or missed still
+gets a time, marked `"approx": true`. The same file has `phrases` (split at punctuation and
+pauses) and `extras` (anything heard that isn't in the script); `.srt` has the phrases as
+subtitles for an editor's timeline. `--out` delivers both as `<name>_words.json` and `<name>.srt`.
 
 ### The page
 

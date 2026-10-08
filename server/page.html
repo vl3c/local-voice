@@ -366,7 +366,9 @@ function renderTake(res, autoplay) {
   const dl = el("span", {class: "dl"},
     el("a", {href: "/files/" + encodeURIComponent(res.files.wet), download: res.files.wet, tip: "Download the processed audio as WAV (lossless, 48 kHz)."}, "WAV"),
     res.files.mp3 ? el("a", {href: "/files/" + encodeURIComponent(res.files.mp3), download: res.files.mp3, tip: "Download as MP3: what WhatsApp and most messengers accept."}, "MP3") : null,
-    res.files.voice ? el("a", {href: "/files/" + encodeURIComponent(res.files.voice), download: res.files.voice, tip: "Download the human voice under the effects as WAV: sample-aligned with the processed audio, with the same pitch, tempo, reverb, length and loudness. Lay it under the processed track in an edit to mix machine and human."}, "voice WAV") : null);
+    res.files.voice ? el("a", {href: "/files/" + encodeURIComponent(res.files.voice), download: res.files.voice, tip: "Download the human voice under the effects as WAV: sample-aligned with the processed audio, with the same pitch, tempo, reverb, length and loudness. Lay it under the processed track in an edit to mix machine and human."}, "voice WAV") : null,
+    res.files.words ? el("a", {href: "/files/" + encodeURIComponent(res.files.words), download: res.files.words, tip: "Word timings as JSON: when each word of the script starts and ends in the processed audio, in seconds (approximate where Whisper misheard or missed it), plus phrases. For cueing animation to the words."}, "words") : null,
+    res.files.srt ? el("a", {href: "/files/" + encodeURIComponent(res.files.srt), download: res.files.srt, tip: "Subtitles (SRT), one cue per phrase, timed to the processed audio: import into an editor as a track to see the words on the timeline."}, "SRT") : null);
   box.append(el("div", {class: "lbl", tip: "The final audio with the preset applied (48 kHz). Plays automatically when the take arrives."}, "processed", dl));
   for (const w of (res.warnings || [])) box.append(el("div", {class: "warn"}, "⚠ " + w));
   if (res.sentences && res.sentences.some(x => x.tries > 1)) {

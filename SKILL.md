@@ -172,7 +172,9 @@ and settings can be compared, and clips cut together, without volume jumps.
 `output/`: `<id>_dry.wav` (24 kHz, the voice as generated), `<id>_fx-<preset>[_pitch-4][_tempo0.85][_hall].wav`
 and `.mp3` (48 kHz, processed; one pair per effects combination), `..._voice.wav` (the human
 voice under that render, sample-aligned with it: same tempo, pitch, reverb, length and loudness,
-for mixing machine and human in an edit), `<id>.json` (text, instruction,
+for mixing machine and human in an edit), with `--check` `..._words.json` (when each script word
+starts and ends in that render, `"approx": true` where Whisper misheard it; plus phrases) and `.srt`
+(the phrases as subtitles): give these to whoever animates to the words. `<id>.json` (text, instruction,
 seed: everything to redo it), and a matching `.png` with `--check`. Responses may carry
 `warnings` (the CLI prints them as `WARNING:`) and `check_error` (the take is fine, the check
 failed): relay warnings to the user.
@@ -233,6 +235,8 @@ lines with `--like`.
   swing it from 0% to 90%. Don't tune presets to a single take's score: compare across 3-4 takes.
 - **The spectrogram:** speech should show clear formant bands and gaps between words. A solid
   wall with no gaps means too much distortion or a vocoder that's smearing.
+- **Word timings** (`words` in the JSON, `_words.json` and `.srt` with `--out`) are on the
+  render's own timeline; `"approx": true` marks a word Whisper misheard or missed.
 
 ## 5. When you're done
 

@@ -69,6 +69,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 import serverlog  # noqa: E402  (server/, on sys.path as the script's folder)
 import voicefx  # noqa: E402
 from textnorm import normalise  # noqa: E402  (server/, on sys.path as the script's folder)
+import words as wordtiming  # noqa: E402  (server/, on sys.path as the script's folder)
 
 # Instruction strength. Breeze recommends 4; the default style uses 6, which pushes the
 # voice harder towards its description (deeper, colder, more machine-like).
@@ -237,6 +238,17 @@ class _Whisper:
                                          "logprob_threshold": -1.0},
                         return_timestamps=len(audio) > 30 * 16000)
         return out["text"].strip()
+
+    def words(self, audio: np.ndarray, sr: int, language: str = "en") -> list[dict]:
+        """Whisper's words with their times: [{"text", "timestamp": (start, end)}], in seconds."""
+        if sr != 16000:
+            from scipy.signal import resample_poly
+            g = np.gcd(sr, 16000)
+            audio = resample_poly(audio, 16000 // g, sr // g)
+        out = self.pipe({"raw": audio.astype(np.float32), "sampling_rate": 16000}, return_timestamps="word",
+                        chunk_length_s=30 if len(audio) > 30 * 16000 else None,
+                        generate_kwargs={"language": language, "task": "transcribe"})
+        return out.get("chunks", [])
 
 
 class _Omni:
@@ -422,17 +434,9 @@ def asr() -> _Whisper:
 
 # --------------------------------------------------------------------------- takes
 
-# Romanian is written with both comma-below (ș ț, correct) and cedilla (ş ţ, legacy)
-# letters; Whisper uses either. Compare them as equal.
-_FOLD = str.maketrans({"ş": "ș", "ţ": "ț", "Ş": "ș", "Ţ": "ț"})
-
-
-_TOKEN = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
-
-
-def _words(s: str) -> list[str]:
-    s = re.sub(r"\([^)]*\)", " ", s.lower().translate(_FOLD))  # drop vocal events like (sigh)
-    return _TOKEN.findall(s)
+# Lower-case words with vocal events like (sigh) dropped, and Romanian's two spellings
+# of ș/ț folded together: how scripts and transcripts are compared.
+_words = wordtiming.tokens
 
 
 def word_match(expected: str, heard: str) -> float:
@@ -544,8 +548,9 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
            "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2)}
     if check:
         try:
-            c = _check(tid, meta, dry, sr, wet, wet_path)
-            res["files"]["spectrogram"] = c.pop("spectrogram")
+            timeline = voicefx.timed_voice(dry, sr, preset, tempo)
+            c = _check(tid, meta, dry, sr, wet, wet_path, timeline)
+            res["files"].update(c.pop("files"))
             res.update(c)
         except Exception as exc:  # the take exists either way: return it, say the check failed
             res["check_error"] = f"{type(exc).__name__}: {exc}"
@@ -553,7 +558,8 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
     return res
 
 
-def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_path: Path) -> dict:
+def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_path: Path,
+           timeline: np.ndarray) -> dict:
     # Score against what was actually spoken: Romanian numbers are spelled out first.
     expected = meta.get("spoken_text") or meta["text"]
     n = len(_words(expected))
@@ -565,8 +571,19 @@ def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_
     heard_wet = asr()(wet, voicefx.SR, n, lang)
     png = wet_path.with_suffix(".png")
     spectrogram(wet, voicefx.SR, png, f"{tid}  {meta.get('model', '')}  |  {meta['text'][:90]}")
+    timing = word_timing(expected, timeline, lang)
+    files = {"spectrogram": png.name}
+    if timing["words"]:
+        # Next to the render they time: the same words, on this render's own timeline.
+        words_path = wet_path.with_name(wet_path.stem + "_words.json")
+        words_path.write_text(json.dumps({"take": tid, "audio": wet_path.name, **timing}, indent=2,
+                                         ensure_ascii=False), encoding="utf-8")
+        srt_path = wet_path.with_suffix(".srt")
+        srt_path.write_text(wordtiming.srt(timing["phrases"]), encoding="utf-8")
+        files.update(words=words_path.name, srt=srt_path.name)
     return {
-        "spectrogram": png.name,
+        "files": files,
+        "words": timing["words"],
         "heard": {"dry": heard_dry, "wet": heard_wet},
         # Whisper writes numbers as digits or words at whim: normalise both sides the same way.
         "match": {"dry": word_match(expected, normalise(heard_dry, lang)),
@@ -574,6 +591,21 @@ def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_
         # A looping transcript says nothing about the audio either way: listen instead.
         "asr_unreliable": [k for k, h in (("dry", heard_dry), ("wet", heard_wet)) if looks_hallucinated(h)],
     }
+
+
+def word_timing(expected: str, timeline: np.ndarray, lang: str) -> dict:
+    """When each word of `expected` is spoken in `timeline` (the clean voice on the render's
+    timeline, see voicefx.timed_voice): {"words", "phrases", "extras"}.
+
+    Words come from Whisper, matched to the script and snapped to the sound's edges;
+    phrases group them for subtitles; extras is what Whisper heard beyond the script.
+    """
+    script = wordtiming.script_words(expected)
+    heard = wordtiming.heard_words(asr().words(timeline, voicefx.SR, lang), lambda s: normalise(s, lang))
+    words, extras = wordtiming.align(script, heard)
+    active = wordtiming.activity(timeline, voicefx.SR)
+    words = wordtiming.snap(wordtiming.split_at_pauses(words, active), active)
+    return {"words": words, "phrases": wordtiming.phrases(words, script, expected), "extras": extras}
 
 
 def _release_cache() -> None:
@@ -1002,7 +1034,7 @@ def delete_take(tid: str):
     return {"id": tid, "deleted": len(files)}
 
 
-RENDER_FILE = re.compile(r"(?P<tid>[0-9]{8}-[0-9]{6}-[0-9a-f]{4})_fx-[A-Za-z0-9_.+-]+\.(wav|mp3|png)")
+RENDER_FILE = re.compile(r"(?P<tid>[0-9]{8}-[0-9]{6}-[0-9a-f]{4})_fx-[A-Za-z0-9_.+-]+\.(wav|mp3|png|json|srt)")
 
 
 @app.delete("/files/{name}")
