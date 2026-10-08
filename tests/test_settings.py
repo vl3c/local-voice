@@ -189,3 +189,118 @@ def test_take_ids_must_match_exactly(app):
     from fastapi import HTTPException
     with pytest.raises(HTTPException):
         app.load_take("20260101-120000-aaaa\n")
+
+
+# ------------------------------------------------------------------ voices
+
+class FakeBreeze:
+    """Records what speak() asks the model for; returns a short buzz."""
+    sample_rate = 24000
+
+    def __init__(self):
+        self.calls = []
+
+    def synth(self, text, instruction, seed, cfg_scale, ref_audio=None, ref_text=None):
+        self.calls.append({"instruction": instruction, "seed": seed, "ref": ref_audio})
+        t = np.arange(self.sample_rate) / self.sample_rate
+        return (0.3 * np.sign(np.sin(2 * np.pi * 110 * t))).astype(np.float32), cfg_scale
+
+
+@pytest.fixture()
+def fake(app, monkeypatch):
+    engine = FakeBreeze()
+    monkeypatch.setattr(app, "tts", lambda: engine)
+    return engine
+
+
+def say(app, **body):
+    return app.speak(app.SpeakReq(**{"text": "We are the dark.", "check": False, **body}))
+
+
+def test_no_voice_means_the_default_voice_with_its_seed(app, fake):
+    r = say(app)
+    v = app.voice_catalog()[app.DEFAULT_VOICE]
+    assert fake.calls[-1]["instruction"] == v["instruction"] and fake.calls[-1]["seed"] == v["seed"]
+    assert r["voice"] == app.DEFAULT_VOICE
+
+
+def test_a_voice_brings_its_own_description_and_seed(app, fake):
+    v = app.voice_catalog()["young-woman"]
+    say(app, voice="young-woman")
+    assert fake.calls[-1] == {"instruction": v["instruction"], "seed": v["seed"], "ref": None}
+    say(app, voice="young-woman", seed=5)
+    assert fake.calls[-1]["seed"] == 5  # an explicit seed still wins
+
+
+def test_a_description_overrides_the_voice(app, fake):
+    r = say(app, voice="child", instruction="A tired robot.")
+    assert fake.calls[-1]["instruction"] == "A tired robot." and r["voice"] is None
+
+
+def test_the_saved_voice_applies_when_the_request_names_none(app, fake):
+    app.save_settings(app.Settings(voice="child"))
+    say(app)
+    assert fake.calls[-1]["instruction"] == app.voice_catalog()["child"]["instruction"]
+    assert fake.calls[-1]["seed"] == app.voice_catalog()["child"]["seed"]
+
+
+def test_unknown_voices_are_refused(app, fake):
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        say(app, voice="no-such-voice")
+    with pytest.raises(HTTPException):
+        app.save_settings(app.Settings(voice="no-such-voice"))
+
+
+def test_each_voice_keeps_its_own_romanian_clone(app):
+    make_take(app, "20260101-120000-aaaa", f0=65)
+    make_take(app, "20260101-120000-bbbb", f0=280)
+    app.set_default_voice("20260101-120000-aaaa")
+    app.set_default_voice("20260101-120000-bbbb", "child")
+    assert app.default_voice_info()["id"] == "20260101-120000-aaaa"
+    assert app.default_voice_info("child")["id"] == "20260101-120000-bbbb"
+    assert app.default_voice_info("young-woman") == {}
+
+
+def test_presets_no_longer_carry_a_voice():
+    import voicefx
+    assert all("instruction" not in p for p in voicefx.list_presets().values())
+
+
+def test_a_voice_with_romanian_attributes_gets_a_native_romanian_take(app, monkeypatch):
+    made = []
+
+    def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
+        made.append({"language": language, "instruct": instruct, "seed": seed, "ref": ref_audio})
+        sr = 24000
+        t = np.arange(sr) / sr
+        sf.write(out, (0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32), sr)
+        return {"spoken_text": text, "sentences": [], "duration_s": 1.0}
+
+    monkeypatch.setattr(app, "omni_take", fake_omni_take)
+    monkeypatch.setattr(app, "tts", lambda: pytest.fail("a native Romanian voice needs no English take"))
+    spec = app.voice_catalog()["young-woman"]["romanian"]
+    wav, text, tid = app.default_voice_ref("young-woman")
+    assert made == [{"language": "ro", "instruct": spec["attributes"], "seed": spec["seed"], "ref": None}]
+    assert wav.is_file() and text == app.VOICE_TEXT_RO
+    assert app.default_voice_info("young-woman")["id"] == tid
+    assert app.default_voice_ref("young-woman")[2] == tid  # made once, then reused
+
+
+def test_a_saved_english_description_never_reaches_romanian(app, monkeypatch):
+    """Review finding: the saved description is English prose; OmniVoice would read it as attributes."""
+    ref = make_take(app, "20260101-120000-cccc")
+    calls = []
+
+    def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
+        calls.append({"instruct": instruct, "ref": ref_audio})
+        sr = 24000
+        sf.write(out, (0.3 * np.sin(2 * np.pi * 120 * np.arange(sr) / sr)).astype(np.float32), sr)
+        return {"spoken_text": text, "sentences": [], "duration_s": 1.0}
+
+    monkeypatch.setattr(app, "omni_take", fake_omni_take)
+    monkeypatch.setattr(app, "default_voice_ref", lambda voice: (app.take_paths(ref)["dry"], "We are the dark.", ref))
+    app.save_settings(app.Settings(instruction="A gravelly old pirate, loud and slurring."))
+    r = app.speak(app.SpeakReq(text="Bună ziua.", language="ro", check=False))
+    assert calls[-1]["instruct"] is None and calls[-1]["ref"] is not None  # cloned, not designed
+    assert r["default_voice"] is True

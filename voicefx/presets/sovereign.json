@@ -1,6 +1,5 @@
 {
   "description": "Sovereign-style, after measuring the original's spectrum: the human voice stays audible and deep (~65 Hz, with its intonation), and under it a steady buzzing hum an octave lower at C1 (32.7 Hz) that only sounds while he speaks and rings for a moment after each phrase (a vocoded drone through a 30.6 ms feedback comb, whose resonances fall on the hum's own harmonics). Light grit, and the original's dark midrange: a deep scoop around 420 Hz and a darker top above 2 kHz.",
-  "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
   "pre": [
     {
       "op": "highpass",

@@ -1,0 +1,108 @@
+{
+  "description": "A ghost: the words spoken in breath (a noise-only vocoder) over a faint, darkened voice. Each phrase arrives on a rising swoosh of air and swells in softly out of its own reversed echo, with a slow, wide chorus: a voice from somewhere beyond. Best with old-frail or a female voice, in a room.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 140
+    }
+  ],
+  "buses": [
+    {
+      "name": "breath",
+      "gain_db": -4,
+      "chain": [
+        {
+          "op": "vocoder",
+          "tone": 0.0,
+          "noise": 0.7,
+          "fricatives": 0.8,
+          "bands": 28,
+          "smooth_ms": 15
+        },
+        {
+          "op": "eq",
+          "bands": [
+            {
+              "type": "highpass",
+              "hz": 350
+            },
+            {
+              "type": "lowpass",
+              "hz": 5500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ghost",
+      "gain_db": -2,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -2
+        },
+        {
+          "op": "eq",
+          "bands": [
+            {
+              "type": "highpass",
+              "hz": 180
+            },
+            {
+              "type": "lowpass",
+              "hz": 3800
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "op": "arrive",
+      "sweep_s": 0.5,
+      "level_db": -8,
+      "lo_hz": 250,
+      "hi_hz": 5000,
+      "gap_s": 0.3
+    },
+    {
+      "op": "preverb",
+      "room_size": 0.82,
+      "damping": 0.5,
+      "mix": 0.22
+    },
+    {
+      "op": "chorus",
+      "rate_hz": 0.25,
+      "depth": 0.35,
+      "delay_ms": 12,
+      "mix": 0.3
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "lowshelf",
+          "hz": 200,
+          "gain_db": -4
+        },
+        {
+          "type": "peak",
+          "hz": 1800,
+          "gain_db": 3,
+          "q": 0.8
+        },
+        {
+          "type": "lowpass",
+          "hz": 5500
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

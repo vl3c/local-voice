@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Built-in voices: who speaks, independent of the effects preset (what processes it).",
+    "Each is an English voice description for Breeze TTS 2 plus a seed whose voice was",
+    "picked by ear. Romanian lines with a built-in voice clone a stored English take of it",
+    "(voices/<id>.wav, made on first use; ancient-male's is the 'default voice'), or, with",
+    "\"romanian\": {\"attributes\", \"seed\"}, a native Romanian take designed from those (a clone",
+    "of an English take carries its accent, which shows on some voices)."
+  ],
+  "ancient-male": {
+    "name": "Ancient male",
+    "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
+    "seed": 74525861,
+    "about": "The Reaper voice and the default: ~65 Hz, slow and cold."
+  },
+  "ancient-female": {
+    "name": "Ancient female",
+    "instruction": "Ancient female, vast and timeless. Low, deep, resonant voice, smooth and cold. Speaks very slowly and calmly with absolute authority and no emotion, every word measured and final, long pauses between phrases.",
+    "seed": 7,
+    "about": "A low, cold, vast female voice (~125 Hz). Dark: the presets brighten it automatically."
+  },
+  "young-woman": {
+    "name": "Young woman",
+    "instruction": "A young woman, calm and clear, low-medium pitch. Speaks slowly and evenly, warm but unsentimental, with quiet certainty.",
+    "seed": 1808546114,
+    "about": "Calm and clear (~190 Hz): lovely blended half machine, half human. Her Romanian voice is native (a clone of her English carried its accent).",
+    "romanian": {
+      "attributes": "female, young adult, very low pitch",
+      "seed": 12
+    }
+  },
+  "child": {
+    "name": "Child",
+    "instruction": "A small child, about eight years old, high and clear voice. Speaks slowly and carefully, calm and curious, unsettlingly composed.",
+    "seed": 7,
+    "about": "An eerily calm child (~285 Hz): small machines, droids, the uncanny."
+  },
+  "old-frail": {
+    "name": "Old, frail",
+    "instruction": "A very old man, deep and frail, a low, rough, breathy voice that cracks. Speaks slowly with long pauses, tired and haunted.",
+    "seed": 7,
+    "about": "A frail, breathy old man (~100 Hz): ghosts and wraiths."
+  },
+  "vampire-male": {
+    "name": "Vampire (male)",
+    "instruction": "A man in his prime, deep and velvety, a low, warm, intimate voice. Speaks slowly and softly, close to the ear, sensual and seductive, with a quiet, hypnotic menace, savouring every word.",
+    "seed": 33,
+    "about": "Velvety and intimate (~100 Hz): seductive, with a quiet, hypnotic menace."
+  },
+  "vampire-female": {
+    "name": "Vampire (female)",
+    "instruction": "A woman in her prime, low and velvety, a smooth, husky, intimate voice. Speaks slowly and softly, close to the ear, sensual and seductive, with a quiet, hypnotic menace, savouring every word.",
+    "seed": 7,
+    "about": "Low, husky and close (~175 Hz): seductive, with a quiet, hypnotic menace."
+  }
+}

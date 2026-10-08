@@ -1,0 +1,82 @@
+{
+  "description": "A small robot: the voice pitched up, a square-ish synth singing it in stepped semitones, crushed to lo-fi bits, with a ring-mod beep tone. Cute-mechanical: perfect on the child voice as it is; on an adult voice use --blend 0.9 (a touch of droid on a clear human voice).",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 150
+    },
+    {
+      "op": "pitch",
+      "semitones": 3
+    }
+  ],
+  "buses": [
+    {
+      "name": "chip",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "vocoder",
+          "f0": "voice",
+          "follow": 1.0,
+          "steps": 2,
+          "chord": [
+            1
+          ],
+          "metal": 0.0,
+          "sub": 0.0,
+          "bands": 24,
+          "noise": 0.02,
+          "fricatives": 0.8
+        },
+        {
+          "op": "crush",
+          "bits": 6,
+          "downsample": 3
+        }
+      ]
+    },
+    {
+      "name": "voice",
+      "gain_db": -8,
+      "chain": [
+        {
+          "op": "ringmod",
+          "hz": 880,
+          "mix": 0.6
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "op": "crush",
+      "bits": 10,
+      "downsample": 2,
+      "mix": 0.5
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "highpass",
+          "hz": 200
+        },
+        {
+          "type": "peak",
+          "hz": 2000,
+          "gain_db": 3,
+          "q": 1.0
+        },
+        {
+          "type": "lowpass",
+          "hz": 9000
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

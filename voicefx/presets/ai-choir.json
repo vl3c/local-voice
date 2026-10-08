@@ -1,0 +1,180 @@
+{
+  "description": "An AI choir: her voice, airy, with quiet layers in other registers underneath (an octave down, an octave and a fifth down, an octave up) and a deep shadow far below for gravitas (24, 20 and 18 semitones down); a muffled echo of everything every 0.5 s, and that deep voice as an echo bouncing left and right at 0.8 s and 1.6 s. Stereo. Made for the female voices.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 80
+    },
+    {
+      "op": "compress",
+      "threshold_db": -26,
+      "ratio": 2.5,
+      "attack_ms": 8,
+      "release_ms": 150,
+      "makeup_db": 3
+    }
+  ],
+  "buses": [
+    {
+      "name": "voice",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "chorus",
+          "rate_hz": 0.3,
+          "depth": 0.15,
+          "delay_ms": 8,
+          "mix": 0.2
+        }
+      ]
+    },
+    {
+      "name": "air",
+      "gain_db": -16,
+      "chain": [
+        {
+          "op": "vocoder",
+          "tone": 0.0,
+          "noise": 1.0,
+          "fricatives": 1.0,
+          "bands": 28,
+          "smooth_ms": 12
+        },
+        {
+          "op": "highpass",
+          "hz": 5000
+        }
+      ]
+    },
+    {
+      "name": "gravitas",
+      "gain_db": -19,
+      "chain": [
+        {
+          "op": "swarm",
+          "voices": [
+            {
+              "semitones": -24
+            },
+            {
+              "semitones": -20
+            },
+            {
+              "semitones": -18
+            }
+          ]
+        },
+        {
+          "op": "lowpass",
+          "hz": 1200
+        }
+      ]
+    },
+    {
+      "name": "octave-down",
+      "gain_db": -9,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -12
+        },
+        {
+          "op": "lowpass",
+          "hz": 1500
+        }
+      ]
+    },
+    {
+      "name": "fifth-below-that",
+      "gain_db": -19,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": -19
+        },
+        {
+          "op": "lowpass",
+          "hz": 1000
+        }
+      ]
+    },
+    {
+      "name": "octave-up",
+      "gain_db": -22,
+      "chain": [
+        {
+          "op": "pitch",
+          "semitones": 12
+        },
+        {
+          "op": "highpass",
+          "hz": 600
+        }
+      ]
+    },
+    {
+      "name": "low-echo",
+      "gain_db": -15,
+      "chain": [
+        {
+          "op": "swarm",
+          "voices": [
+            {
+              "semitones": -20
+            },
+            {
+              "semitones": -18
+            }
+          ]
+        },
+        {
+          "op": "lowpass",
+          "hz": 1400
+        }
+      ],
+      "stereo_echo": {
+        "delay_ms": 800,
+        "feedback": 0.5,
+        "lowpass_hz": 1100,
+        "repeats": 2,
+        "spread": 0.8
+      }
+    }
+  ],
+  "post": [
+    {
+      "op": "echo",
+      "delay_ms": 500,
+      "feedback": 0.35,
+      "mix": 0.22,
+      "lowpass_hz": 1800
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "peak",
+          "hz": 180,
+          "gain_db": -3,
+          "q": 1.0
+        },
+        {
+          "type": "peak",
+          "hz": 380,
+          "gain_db": 2,
+          "q": 0.8
+        },
+        {
+          "type": "highshelf",
+          "hz": 7000,
+          "gain_db": 1.5,
+          "q": 0.7
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

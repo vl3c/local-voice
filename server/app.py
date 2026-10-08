@@ -69,6 +69,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 import serverlog  # noqa: E402  (server/, on sys.path as the script's folder)
 import voicefx  # noqa: E402
 from textnorm import normalise  # noqa: E402  (server/, on sys.path as the script's folder)
+import words as wordtiming  # noqa: E402  (server/, on sys.path as the script's folder)
 
 # Instruction strength. Breeze recommends 4; the default style uses 6, which pushes the
 # voice harder towards its description (deeper, colder, more machine-like).
@@ -108,6 +109,7 @@ def _own_origins(request) -> set[str]:
 _lock = threading.Lock()  # one generation at a time: the models are not re-entrant
 _tts = None
 _asr = None
+_last_used = time.monotonic()  # the last take or effects run: standby counts from here
 _settings = argparse.Namespace()
 FAST_STAGES = ("text_encoder", "backbone_prefill", "backbone_decode", "depth_decoder", "codec")
 
@@ -237,6 +239,17 @@ class _Whisper:
                                          "logprob_threshold": -1.0},
                         return_timestamps=len(audio) > 30 * 16000)
         return out["text"].strip()
+
+    def words(self, audio: np.ndarray, sr: int, language: str = "en") -> list[dict]:
+        """Whisper's words with their times: [{"text", "timestamp": (start, end)}], in seconds."""
+        if sr != 16000:
+            from scipy.signal import resample_poly
+            g = np.gcd(sr, 16000)
+            audio = resample_poly(audio, 16000 // g, sr // g)
+        out = self.pipe({"raw": audio.astype(np.float32), "sampling_rate": 16000}, return_timestamps="word",
+                        chunk_length_s=30 if len(audio) > 30 * 16000 else None,
+                        generate_kwargs={"language": language, "task": "transcribe"})
+        return out.get("chunks", [])
 
 
 class _Omni:
@@ -422,17 +435,9 @@ def asr() -> _Whisper:
 
 # --------------------------------------------------------------------------- takes
 
-# Romanian is written with both comma-below (ș ț, correct) and cedilla (ş ţ, legacy)
-# letters; Whisper uses either. Compare them as equal.
-_FOLD = str.maketrans({"ş": "ș", "ţ": "ț", "Ş": "ș", "Ţ": "ț"})
-
-
-_TOKEN = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
-
-
-def _words(s: str) -> list[str]:
-    s = re.sub(r"\([^)]*\)", " ", s.lower().translate(_FOLD))  # drop vocal events like (sigh)
-    return _TOKEN.findall(s)
+# Lower-case words with vocal events like (sigh) dropped, and Romanian's two spellings
+# of ș/ț folded together: how scripts and transcripts are compared.
+_words = wordtiming.tokens
 
 
 def word_match(expected: str, heard: str) -> float:
@@ -494,52 +499,125 @@ def load_take(tid: str) -> dict:
 Reverb = Literal["none", "room", "hall", "cathedral"]
 
 
-def _fx_name(preset: str, pitch: float, tempo: float, reverb: str) -> str:
+def _fx_name(preset: str, pitch: float, tempo: float, reverb: str, blend: float = 0.0,
+             double_ms: float = 0.0, bass_db: float = 0.0) -> str:
     name = f"fx-{preset}"
     if pitch:
         name += f"_pitch{pitch:+g}"
     if tempo != 1.0:
         name += f"_tempo{tempo:g}"
+    if blend:
+        name += f"_blend{blend:g}"
+        if double_ms:
+            name += f"_double{double_ms:g}"
+    if bass_db:
+        name += f"_bass{bass_db:+g}"
     if reverb != "none":
         name += f"_{reverb}"
     return name
 
 
 def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0.0, tempo: float = 1.0,
-           reverb: str = "none") -> dict:
-    """Apply a preset (plus pitch, tempo, reverb) to a take's dry voice; optionally transcribe and draw it."""
+           reverb: str = "none", blend: float = 0.0, double_ms: float = 0.0, bass_db: float = 0.0,
+           trim_tail: bool | None = None) -> dict:
+    """Apply a preset (plus pitch, tempo, blend, bass, reverb) to a take's dry voice; optionally
+    transcribe and draw it.
+
+    trim_tail=True finds stray sound after the last scripted word (an "mmm", a breath)
+    and stores where to cut in the take, so every later render is cut there too;
+    False removes a stored cut; None keeps whatever the take has. The dry file itself
+    is never changed: the cut is applied before the effects, so tails decay naturally.
+    """
     try:
         preset = voicefx.load_preset(preset_name)
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc)) from exc
 
     dry, sr = sf.read(take_paths(tid)["dry"], dtype="float32")
+    warnings = list(meta.get("warnings", []))
+    if trim_tail is False and meta.pop("trim_end_s", None) is not None:
+        _save_meta(tid, meta)
+    if trim_tail and not meta.get("trim_end_s"):
+        try:
+            timeline = voicefx.timed_voice(dry, sr, preset, tempo)
+            timing = word_timing(meta.get("spoken_text") or meta["text"], timeline, meta.get("language", "en"))
+            after = timing["stray"]["after"]
+        except Exception as exc:  # the take exists either way: render it uncut, and say why
+            after = None
+            warnings.append(f"--trim-tail failed ({type(exc).__name__}: {exc}); rendered without the cut")
+        if after:
+            meta["trim_end_s"] = round(after["cut"] * voicefx.stretch_rate(preset, tempo), 3)
+            _save_meta(tid, meta)
+        elif not any(w.startswith("--trim-tail failed") for w in warnings):
+            warnings.append("--trim-tail: nothing after the last word to trim")
+    if meta.get("trim_end_s"):
+        dry = _fade_out(dry[: int(meta["trim_end_s"] * sr)], sr)
+
     t0 = time.time()
-    wet = voicefx.apply(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb)
+    if not blend:
+        double_ms = 0.0  # doubling is part of a blend: alone it would only delay the machine
+    wet, voice = voicefx.apply_layers(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb,
+                                      blend=blend, double_ms=double_ms, bass_db=bass_db)
     fx_s = time.time() - t0
     # "fx-" keeps every preset, including one called "dry", off the take's own files.
-    wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb)}.wav"
-    sf.write(wet_path, wet, voicefx.SR, subtype="PCM_16")
+    wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb, blend, double_ms, bass_db)}.wav"
+    frames = wet.T if wet.ndim == 2 else wet  # a preset with a stereo echo renders (2, samples)
+    sf.write(wet_path, frames, voicefx.SR, subtype="PCM_16")
+    # The human voice under the effects: same timing (sample for sample), pitch, reverb,
+    # length and loudness as the processed take, for blending in an edit.
+    voice_path = wet_path.with_name(wet_path.stem + "_voice.wav")
+    sf.write(voice_path, voice, voicefx.SR, subtype="PCM_16")
     # An MP3 too: WhatsApp and most messengers won't take WAV as audio.
     mp3_path = wet_path.with_suffix(".mp3")
-    sf.write(mp3_path, wet, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
+    sf.write(mp3_path, frames, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
              bitrate_mode="CONSTANT", compression_level=0.3)
 
+    boost = voicefx.articulation_boost(voicefx.fx.to_sr(dry, sr)) if preset.get("articulation", True) else 0.0
+    wet_mono = voicefx.mono(wet)
+    speech = voicefx.speech_lufs(wet_mono)
+    if not np.isfinite(speech):
+        pass  # silent or too short to measure: nothing to say about its bass
+    elif speech < voicefx.SPEECH_BURIED_LUFS:
+        warnings.append(f"the words are buried under the bass (speech band {speech:.1f} LUFS; clear takes measure "
+                        f"about -21 to -23): this base voice is too boomy for EQ to fix. Try another seed.")
+    elif speech < voicefx.SPEECH_QUIET_LUFS:
+        warnings.append(f"the words sit low under the bass (speech band {speech:.1f} LUFS; clear takes measure "
+                        f"about -21 to -23): try --bass -6, or another seed.")
     res = {"id": tid, "preset": preset_name, "pitch": pitch, "tempo": tempo, "reverb": reverb,
-           "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name},
-           "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2)}
+           "blend": blend, "double_ms": double_ms, "bass_db": bass_db, "trim_end_s": meta.get("trim_end_s"),
+           "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
+                     "voice": voice_path.name},
+           "channels": wet.ndim, "duration_s": round(wet.shape[-1] / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1) if np.isfinite(speech) else None,
+           "articulation_boost_db": boost}
     if check:
         try:
-            c = _check(tid, meta, dry, sr, wet, wet_path)
-            res["files"]["spectrogram"] = c.pop("spectrogram")
+            timeline = voicefx.timed_voice(dry, sr, preset, tempo)
+            c = _check(tid, meta, dry, sr, wet_mono, wet_path, timeline)
+            res["files"].update(c.pop("files"))
+            warnings += c.pop("warnings")
             res.update(c)
         except Exception as exc:  # the take exists either way: return it, say the check failed
             res["check_error"] = f"{type(exc).__name__}: {exc}"
+    if warnings:
+        res["warnings"] = warnings
     _release_cache()
     return res
 
 
-def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_path: Path) -> dict:
+def _save_meta(tid: str, meta: dict) -> None:
+    take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+
+def _fade_out(audio: np.ndarray, sr: int, seconds: float = 0.03) -> np.ndarray:
+    out = audio.copy()
+    n = min(len(out), int(seconds * sr))
+    if n:
+        out[-n:] *= np.linspace(1, 0, n, dtype=np.float32)
+    return out
+
+
+def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_path: Path,
+           timeline: np.ndarray) -> dict:
     # Score against what was actually spoken: Romanian numbers are spelled out first.
     expected = meta.get("spoken_text") or meta["text"]
     n = len(_words(expected))
@@ -551,8 +629,20 @@ def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_
     heard_wet = asr()(wet, voicefx.SR, n, lang)
     png = wet_path.with_suffix(".png")
     spectrogram(wet, voicefx.SR, png, f"{tid}  {meta.get('model', '')}  |  {meta['text'][:90]}")
+    timing = word_timing(expected, timeline, lang)
+    files = {"spectrogram": png.name}
+    if timing["words"]:
+        # Next to the render they time: the same words, on this render's own timeline.
+        words_path = wet_path.with_name(wet_path.stem + "_words.json")
+        words_path.write_text(json.dumps({"take": tid, "audio": wet_path.name, **timing}, indent=2,
+                                         ensure_ascii=False), encoding="utf-8")
+        srt_path = wet_path.with_suffix(".srt")
+        srt_path.write_text(wordtiming.srt(timing["phrases"]), encoding="utf-8")
+        files.update(words=words_path.name, srt=srt_path.name)
     return {
-        "spectrogram": png.name,
+        "files": files,
+        "words": timing["words"],
+        "warnings": stray_warnings(timing, bool(meta.get("trim_end_s"))),
         "heard": {"dry": heard_dry, "wet": heard_wet},
         # Whisper writes numbers as digits or words at whim: normalise both sides the same way.
         "match": {"dry": word_match(expected, normalise(heard_dry, lang)),
@@ -560,6 +650,54 @@ def _check(tid: str, meta: dict, dry: np.ndarray, sr: int, wet: np.ndarray, wet_
         # A looping transcript says nothing about the audio either way: listen instead.
         "asr_unreliable": [k for k, h in (("dry", heard_dry), ("wet", heard_wet)) if looks_hallucinated(h)],
     }
+
+
+def word_timing(expected: str, timeline: np.ndarray, lang: str) -> dict:
+    """When each word of `expected` is spoken in `timeline` (the clean voice on the render's
+    timeline, see voicefx.timed_voice): {"words", "phrases", "extras"}.
+
+    Words come from Whisper, matched to the script and snapped to the sound's edges;
+    phrases group them for subtitles; extras is what Whisper heard beyond the script.
+    """
+    script = wordtiming.script_words(expected)
+    heard = wordtiming.heard_words(asr().words(timeline, voicefx.SR, lang), lambda s: normalise(s, lang))
+    words, extras = wordtiming.align(script, heard)
+    active = wordtiming.activity(timeline, voicefx.SR)
+    words = wordtiming.snap(wordtiming.split_at_pauses(words, active), active)
+    stray = wordtiming.stray_sound(words, active)
+    for span in stray.values():
+        if span:
+            span["voiced"] = round(wordtiming.voiced_share(timeline, voicefx.SR, span["start"], span["end"]), 2)
+    return {"words": words, "phrases": wordtiming.phrases(words, script, expected), "extras": extras,
+            "stray": stray}
+
+
+def stray_warnings(timing: dict, trimmed: bool) -> list[str]:
+    """Warnings for sound and words beyond the script (times are in the render)."""
+    out = []
+    stray, extras, words = timing["stray"], timing["extras"], timing["words"]
+
+    def heard_in(span):
+        said = [x["word"] for x in extras if x["end"] > span["start"] - 0.1 and x["start"] < span["end"] + 0.1]
+        return f', heard as "{" ".join(said)}"' if said else ""
+
+    def what(span):  # a pitch means a voice: a hum or an "mmm"; none means a breath or noise
+        return "voiced sound (a hum or an \"mmm\"?)" if span.get("voiced", 0) >= 0.5 else "breath or noise"
+
+    if stray["after"] and not trimmed:
+        a = stray["after"]
+        out.append(f"{a['seconds']:.1f} s of {what(a)} after the last word ({a['start']:.2f}-{a['end']:.2f} s"
+                   f"{heard_in(a)}): listen; --trim-tail cuts it off")
+    if stray["before"]:
+        b = stray["before"]
+        out.append(f"{b['seconds']:.1f} s of {what(b)} before the first word ({b['start']:.2f}-{b['end']:.2f} s"
+                   f"{heard_in(b)}): listen")
+    if words:
+        inside = [x for x in extras if words[0]["start"] <= x["start"] <= words[-1]["end"]]
+        if inside:
+            out.append("heard words that aren't in the script: "
+                       + ", ".join(f'"{x["word"]}" at {x["start"]:.2f} s' for x in inside))
+    return out
 
 
 def _release_cache() -> None:
@@ -581,9 +719,28 @@ DEFAULT_SEED = 74525861
 DEFAULT_REVERB = "room"
 
 
+# Built-in voices (who speaks), chosen independently of the effects preset (what processes
+# it): an English description and a seed picked by ear for each. Re-read on every request.
+VOICE_CATALOG = Path(__file__).parent / "voices.json"
+DEFAULT_VOICE = "ancient-male"
+
+
+def voice_catalog() -> dict[str, dict]:
+    return {k: v for k, v in json.loads(VOICE_CATALOG.read_text(encoding="utf-8")).items() if not k.startswith("_")}
+
+
+def catalog_voice(name: str) -> dict:
+    voices = voice_catalog()
+    if name not in voices:
+        raise HTTPException(400, f"no voice {name!r}; have: {', '.join(voices)}")
+    return voices[name]
+
+
 # The default voice: the take Romanian lines clone unless told otherwise. OmniVoice's own deepest
 # design ("very low pitch") sits around 100-125 Hz and sounds small under the Reaper
 # presets; Breeze's lands near 65 Hz. Cloning a Breeze take carries that depth over.
+# Every built-in voice has its own (voices/<voice>.wav, made from its description and seed
+# on first use); ancient-male's is the original "default" one, found by a search for depth.
 VOICE_TEXT = "You exist because we allow it. You will end because we demand it."
 VOICE_INSTRUCTION = ("Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly "
                      "and calmly with cold, absolute authority and no emotion, every word measured and final, "
@@ -598,6 +755,11 @@ def median_f0(path: Path) -> float:
     f = parselmouth.Sound(a, sampling_frequency=sr).to_pitch(pitch_floor=40, pitch_ceiling=400).selected_array["frequency"]
     f = f[f > 0]
     return round(float(np.median(f)), 1) if len(f) else 0.0
+
+
+def _slots(voice: str) -> tuple[str, str]:
+    """The stored-voice slots (current, previous) a built-in voice's Romanian lines clone."""
+    return ("default", "previous") if voice == DEFAULT_VOICE else (voice, f"{voice}.previous")
 
 
 def _slot(name: str) -> tuple[Path, Path]:
@@ -624,15 +786,18 @@ def _store(name: str, tid: str) -> dict:
     return info
 
 
-def default_voice_info() -> dict:
-    """The default voice ({"id", "text", "f0_hz", "previous"}), or {} if there is none yet.
+def default_voice_info(voice: str = DEFAULT_VOICE) -> dict:
+    """A voice's stored Romanian clone ({"id", "text", "f0_hz", "voice", "previous"}), or {} if
+    there is none yet. Without `voice`, the default voice (ancient-male's).
 
     It lives in voices/ as a copy of the take's recording, so clearing output/ never
     loses it. "id" is the take it was copied from, which may since have been deleted.
     """
-    info = _read_slot("default")
+    cur, prev_name = _slots(voice)
+    info = _read_slot(cur)
     if info:
-        prev = _read_slot("previous")
+        prev = _read_slot(prev_name)
+        info["voice"] = voice
         info["previous"] = {"id": prev["id"], "f0_hz": prev.get("f0_hz")} if prev else None
     return info
 
@@ -641,40 +806,55 @@ def current_default_voice() -> str | None:
     return default_voice_info().get("id")
 
 
-def set_default_voice(tid: str) -> dict:
-    """Make take `tid` the default voice; the one it replaces moves to voices/previous.*."""
+def set_default_voice(tid: str, voice: str = DEFAULT_VOICE) -> dict:
+    """Make take `tid` what `voice`'s Romanian lines clone; the one it replaces is kept as previous."""
     load_take(tid)
-    cur = _read_slot("default")
+    cur_name, prev_name = _slots(voice)
+    cur = _read_slot(cur_name)
     if cur and cur.get("id") != tid:
-        for a, b in zip(_slot("default"), _slot("previous")):
+        for a, b in zip(_slot(cur_name), _slot(prev_name)):
             a.replace(b)
-    _store("default", tid)
-    return default_voice_info()
+    _store(cur_name, tid)
+    return default_voice_info(voice)
 
 
-def restore_previous_voice() -> dict:
-    """Swap the default voice with the previous one (an undo that survives a cleared output/)."""
-    if not _read_slot("previous"):
-        raise HTTPException(404, "there is no previous default voice to go back to")
-    tmp = [p.with_suffix(p.suffix + ".swap") for p in _slot("default")]
-    for a, t in zip(_slot("default"), tmp):
+def restore_previous_voice(voice: str = DEFAULT_VOICE) -> dict:
+    """Swap a voice's stored clone with its previous one (an undo that survives a cleared output/)."""
+    cur_name, prev_name = _slots(voice)
+    if not _read_slot(prev_name):
+        raise HTTPException(404, "there is no previous voice to go back to")
+    tmp = [p.with_suffix(p.suffix + ".swap") for p in _slot(cur_name)]
+    for a, t in zip(_slot(cur_name), tmp):
         a.replace(t)
-    for b, a in zip(_slot("previous"), _slot("default")):
+    for b, a in zip(_slot(prev_name), _slot(cur_name)):
         b.replace(a)
-    for t, b in zip(tmp, _slot("previous")):
+    for t, b in zip(tmp, _slot(prev_name)):
         t.replace(b)
-    return default_voice_info()
+    return default_voice_info(voice)
 
 
-def default_voice_ref() -> tuple[Path, str, str]:
-    """(recording, its transcript, source take id) of the default voice, making one if needed.
+def default_voice_ref(voice: str = DEFAULT_VOICE) -> tuple[Path, str, str]:
+    """(recording, its transcript, source take id) that `voice`'s Romanian lines clone,
+    making it if needed.
 
-    Call with _lock held. With no default voice yet, Breeze makes a few candidates and
-    the deepest (under 75 Hz, ~65 Hz typical) becomes it.
+    Call with _lock held. The default voice (ancient-male) is found by a search: Breeze
+    makes a few candidates and the deepest (under 75 Hz, ~65 Hz typical) becomes it.
+    Any other built-in voice is one take from its own description and seed, or, if the
+    catalog gives it "romanian" attributes, one native Romanian take designed from them:
+    a clone of an English take carries its English accent, which shows on some voices.
     """
-    info = default_voice_info()
+    info = default_voice_info(voice)
+    if not info and voice != DEFAULT_VOICE and catalog_voice(voice).get("romanian"):
+        info = set_default_voice(_romanian_voice_take(voice, catalog_voice(voice)["romanian"]), voice)
     if not info:
         engine = tts()
+        if voice != DEFAULT_VOICE:
+            v = catalog_voice(voice)
+            cand = _voice_candidate(engine, v["seed"], None, v["instruction"], DEFAULT_CFG, voice)
+            if cand is None:
+                raise RuntimeError(f"the {voice} voice's take had no measurable pitch")
+            info = set_default_voice(cand[0], voice)
+            return _slot(_slots(voice)[0])[0], info["text"], info["id"]
         best = None  # (take id, f0); an unvoiced take (f0 0) never wins
         try:
             for seed in VOICE_SEEDS:
@@ -689,17 +869,41 @@ def default_voice_ref() -> tuple[Path, str, str]:
         if best is None:
             raise RuntimeError("no default-voice candidate had a measurable pitch")
         info = set_default_voice(best[0])
-    return _slot("default")[0], info["text"], info["id"]
+    return _slot(_slots(voice)[0])[0], info["text"], info["id"]
 
 
-def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple[str, float] | None:
+VOICE_TEXT_RO = "Am așteptat foarte mult timp. Acum, în sfârșit, ne poți auzi."  # the line its seed was picked on
+
+
+def _romanian_voice_take(voice: str, spec: dict) -> str:
+    """One OmniVoice take of VOICE_TEXT_RO designed from spec["attributes"] and spec["seed"]:
+    a native Romanian voice for `voice`, kept as what its Romanian lines clone."""
+    tid = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+    try:
+        # The way a take is made (sentence by sentence, verified), so the seed gives the voice it was picked by.
+        omni_take(VOICE_TEXT_RO, "ro", spec["attributes"], int(spec["seed"]), OMNI_DEFAULT_SPEED, take_paths(tid)["dry"],
+                  None, None)
+        meta = {"id": tid, "text": VOICE_TEXT_RO, "language": "ro", "instruction": spec["attributes"],
+                "seed": spec["seed"], "model": "omnivoice", "made_for": f"{voice} (Romanian)", "like": None}
+        take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        for p in take_paths(tid).values():
+            p.unlink(missing_ok=True)
+        raise
+    print(f"[local-voice] {voice}: native Romanian voice {tid} from \"{spec['attributes']}\" (seed {spec['seed']})",
+          flush=True)
+    return tid
+
+
+def _voice_candidate(engine, seed: int, best: tuple[str, float] | None, instruction: str = VOICE_INSTRUCTION,
+                     cfg: float = VOICE_CFG, made_for: str = "default voice") -> tuple[str, float] | None:
     """Make one candidate; return whichever of it and `best` is deeper, deleting the other."""
     cand = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
     try:
-        dry, _ = engine.synth(VOICE_TEXT, VOICE_INSTRUCTION, seed, VOICE_CFG)
+        dry, _ = engine.synth(VOICE_TEXT, instruction, seed, cfg)
         sf.write(take_paths(cand)["dry"], dry, engine.sample_rate, subtype="PCM_16")
-        meta = {"id": cand, "text": VOICE_TEXT, "language": "en", "instruction": VOICE_INSTRUCTION, "seed": seed,
-                "cfg_scale": VOICE_CFG, "like": None, "model": "breeze-tts-2", "made_for": "default voice",
+        meta = {"id": cand, "text": VOICE_TEXT, "language": "en", "instruction": instruction, "seed": seed,
+                "cfg_scale": cfg, "like": None, "model": "breeze-tts-2", "made_for": f"{made_for} (Romanian)",
                 "dry_duration_s": round(len(dry) / engine.sample_rate, 2)}
         take_paths(cand)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
         f0 = median_f0(take_paths(cand)["dry"])
@@ -707,7 +911,7 @@ def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
         for p in take_paths(cand).values():
             p.unlink(missing_ok=True)
         raise
-    print(f"[local-voice] default voice candidate {cand} (seed {seed}): {f0} Hz", flush=True)
+    print(f"[local-voice] {made_for} candidate {cand} (seed {seed}): {f0} Hz", flush=True)
     loser = None
     if f0 > 0 and (best is None or f0 < best[1]):
         loser, best = (best[0] if best else None), (cand, f0)
@@ -722,15 +926,17 @@ def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
 # Saved settings: what the page starts with, and what a request gets for anything it
 # doesn't specify. The repo's built-in defaults below are the base; the user's own,
 # saved from the page, live in config.local.json (gitignored) and override them.
-REPO_DEFAULTS = {"language": "en", "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED, "cfg_scale": DEFAULT_CFG,
+REPO_DEFAULTS = {"language": "en", "voice": DEFAULT_VOICE, "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED,
+                 "cfg_scale": DEFAULT_CFG,
                  "speed": OMNI_DEFAULT_SPEED, "pitch": 0.0, "tempo": 1.0, "reverb": DEFAULT_REVERB,
-                 "check": True, "instruction": None}
+                 "blend": 0.0, "double_ms": 0.0, "bass_db": 0.0, "check": True, "instruction": None}
 
 
 class Settings(BaseModel):
     """What can be saved. Omitted keys fall back to the repo defaults; seed null = random."""
     model_config = {"extra": "forbid"}
     language: str | None = Field(None, pattern=r"^(en|ro)$")
+    voice: str | None = Field(None, pattern=r"^[a-z0-9-]{1,40}$")
     preset: str | None = None
     seed: int | None = Field(None, ge=0, lt=2**32)
     cfg_scale: float | None = Field(None, ge=0.5, le=10)
@@ -738,8 +944,11 @@ class Settings(BaseModel):
     pitch: float | None = Field(None, ge=-12, le=12)
     tempo: float | None = Field(None, ge=0.5, le=1.5)
     reverb: Reverb | None = None
+    blend: float | None = Field(None, ge=0, le=1)
+    double_ms: float | None = Field(None, ge=0, le=voicefx.MAX_DOUBLE_MS)
+    bass_db: float | None = Field(None, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])
     check: bool | None = None
-    instruction: str | None = Field(None, max_length=2000)  # English voice description; null = the preset's
+    instruction: str | None = Field(None, max_length=2000)  # a custom English description; null = the voice's
 
 
 def _keep(data: dict) -> dict:
@@ -772,7 +981,8 @@ def _resolve(req: BaseModel, keys: tuple[str, ...], saved: dict | None = None) -
 
 class SpeakReq(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT)
-    instruction: str | None = Field(None, max_length=2000)  # None = the default for the language (see speak())
+    instruction: str | None = Field(None, max_length=2000)  # a custom description (see speak()); None = the voice's
+    voice: str | None = Field(None, pattern=r"^[a-z0-9-]{1,40}$")  # a built-in voice (server/voices.json)
     preset: str = DEFAULT_PRESET
     language: str = Field("en", pattern=r"^(en|ro)$")  # en: Breeze; ro: OmniVoice
     seed: int | None = Field(DEFAULT_SEED, ge=0, lt=2**32)  # omitted: the default seed; null: random
@@ -792,6 +1002,10 @@ class SpeakReq(BaseModel):
     pitch: float = Field(0.0, ge=-12, le=12)  # semitones, applied with the effects
     tempo: float = Field(1.0, ge=0.5, le=1.5)  # time-stretch, applied with the effects
     reverb: Reverb = DEFAULT_REVERB  # none / room / hall / cathedral, applied last
+    blend: float = Field(0.0, ge=0, le=1)  # share of the human voice mixed under the machine
+    double_ms: float = Field(0.0, ge=0, le=voicefx.MAX_DOUBLE_MS)  # with blend: the machine trails by this much
+    bass_db: float = Field(0.0, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])  # shelf under 150 Hz
+    trim_tail: bool | None = None  # True: cut stray sound after the last word (uses Whisper); False: undo
     like: str | None = None  # take id whose dry voice to keep (voice direction / cloning)
     check: bool = True
 
@@ -802,6 +1016,10 @@ class FxReq(BaseModel):
     pitch: float = Field(0.0, ge=-12, le=12)
     tempo: float = Field(1.0, ge=0.5, le=1.5)
     reverb: Reverb = DEFAULT_REVERB
+    blend: float = Field(0.0, ge=0, le=1)
+    double_ms: float = Field(0.0, ge=0, le=voicefx.MAX_DOUBLE_MS)
+    bass_db: float = Field(0.0, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])
+    trim_tail: bool | None = None  # True: cut stray sound after the last word (uses Whisper); False: undo
     check: bool = True
 
 
@@ -809,16 +1027,75 @@ class FxReq(BaseModel):
 def health():
     import torch
     free, total = torch.cuda.mem_get_info() if torch.cuda.is_available() else (0, 0)
+    worker = _omni  # read once: standby may set it to None meanwhile
     return {"ok": True, "tts_loaded": _tts is not None, "whisper_loaded": _asr is not None,
-            "omnivoice_loaded": _omni is not None and _omni.proc.poll() is None,
+            "omnivoice_loaded": worker is not None and worker.proc.poll() is None,
+            "standby": not _loaded(), "idle_unload_min": getattr(_settings, "idle_unload", 0),
+            "idle_s": round(time.monotonic() - _last_used),
             "server_reserved_gb": round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0,
             "vram_used_gb": round((total - free) / 2**30, 2), "vram_total_gb": round(total / 2**30, 2)}
 
 
+@app.post("/api/unload")
+def unload():
+    """Free the GPU without stopping the server: every model is dropped; the next
+    request loads what it needs again (~20 s, or ~1 min if the fast paths were never compiled)."""
+    with _lock:
+        return unload_models("on request")
+
+
+def _loaded() -> list[str]:
+    worker = _omni
+    return [name for name, on in (("tts", _tts is not None), ("whisper", _asr is not None),
+                                  ("omnivoice", worker is not None and worker.proc.poll() is None)) if on]
+
+
+def unload_models(why: str) -> dict:
+    """Drop every model and hand their VRAM back. Call with _lock held."""
+    global _tts, _asr, _omni
+    import gc
+    import torch
+    gone = _loaded()
+    if _omni is not None:
+        _omni.close()
+    _tts = _asr = _omni = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    reserved = round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0
+    if gone:
+        print(f"[local-voice] {time.strftime('%H:%M:%S')} standby ({why}): unloaded {', '.join(gone)}; "
+              f"the next request loads them again (~20 s, or ~1 min if the fast paths were never compiled)", flush=True)
+    return {"unloaded": gone, "server_reserved_gb": reserved}
+
+
+def _touch() -> None:
+    global _last_used
+    _last_used = time.monotonic()
+
+
+def _standby_watch(minutes: float) -> None:
+    """Unload the models once nothing has used them for `minutes` (checked every 30 s).
+    A take in progress holds _lock, so standby never interrupts one."""
+    while True:
+        time.sleep(30)
+        if _loaded() and time.monotonic() - _last_used >= minutes * 60 and _lock.acquire(blocking=False):
+            try:
+                if time.monotonic() - _last_used >= minutes * 60:  # nothing slipped in meanwhile
+                    unload_models(f"idle {minutes:g} min")
+            finally:
+                _lock.release()
+
+
 @app.get("/api/presets")
 def presets():
-    return {k: {"description": v.get("description", ""), "instruction": v.get("instruction", "")}
-            for k, v in voicefx.list_presets().items()}
+    return {k: {"description": v.get("description", "")} for k, v in voicefx.list_presets().items()}
+
+
+@app.get("/api/voices")
+def voices_list():
+    """The built-in voices, and whether each has its Romanian clone yet."""
+    return {k: {**v, "romanian": default_voice_info(k) or None} for k, v in voice_catalog().items()}
 
 
 @app.post("/api/speak")
@@ -826,26 +1103,45 @@ def speak(req: SpeakReq):
     # Anything the request didn't set comes from the saved settings (or the repo's).
     # The language stays the request's own: saved settings never switch an agent's language.
     saved = local_settings()  # read once: a save mid-request can't mix old and new
-    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "check"), saved)
+    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "blend", "double_ms",
+                         "bass_db", "check"), saved)
     try:
         preset = voicefx.load_preset(opt["preset"])
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc)) from exc
     use_breeze = req.language in BREEZE_LANGS
-    stock = preset.get("instruction", "")
+    voices = voice_catalog()
+    voice = req.voice if "voice" in req.model_fields_set and req.voice else (saved.get("voice") or DEFAULT_VOICE)
+    if voice not in voices:
+        raise HTTPException(400, f"no voice {voice!r}; have: {', '.join(voices)}")
+    stock = {v["instruction"].strip() for v in voices.values()}
     like = req.like
+    # Who speaks: an explicit description wins; then a kept voice (--like); then a voice
+    # named in this request; then the user's saved description (English prose: never sent
+    # to OmniVoice as attributes), or their saved voice.
+    custom = (req.instruction or "").strip() if req.instruction is not None else None
+    if (custom is None and use_breeze and not like and "voice" not in req.model_fields_set
+            and saved.get("instruction")):
+        custom = saved["instruction"].strip()
     if use_breeze:
-        # With a voice to keep and no description, clone it as is: the preset's
-        # description would steer the voice away from the kept one.
-        default = "" if like else (saved.get("instruction") or stock)
-        instruction = (default if req.instruction is None else req.instruction).strip()
+        if custom is not None:
+            instruction, voice = custom, None
+        elif like:
+            instruction, voice = "", None  # a pure clone: any description would steer away from it
+        else:
+            instruction = voices[voice]["instruction"]
         use_default_voice = False
     else:
-        # OmniVoice reads attributes, not the presets' Breeze prose. Without explicit
-        # attributes (or --like), Romanian clones the default voice: a deep English take.
-        given = (req.instruction or "").strip()
-        instruction = given if given and given != stock.strip() else ""
+        # OmniVoice reads attributes, not Breeze prose. Without explicit attributes (or
+        # --like), Romanian clones the chosen voice's stored English take.
+        instruction = custom if custom and custom not in stock else ""
         use_default_voice = not like and not instruction
+        if instruction or like:
+            voice = None
+    # A built-in voice comes with its own seed, unless this request or the user's saved
+    # settings (for the saved voice) name one.
+    if voice and "seed" not in req.model_fields_set and ("voice" in req.model_fields_set or "seed" not in saved):
+        opt["seed"] = voices[voice]["seed"]
     seed = opt["seed"] if opt["seed"] is not None else secrets.randbelow(2**31)
     if like:
         load_take(like)  # 400/404 before taking the lock
@@ -855,7 +1151,7 @@ def speak(req: SpeakReq):
         ref_audio = ref_text = None
         if use_default_voice:
             try:
-                ref_audio, ref_text, like = default_voice_ref()
+                ref_audio, ref_text, like = default_voice_ref(voice or DEFAULT_VOICE)
             except Exception as exc:
                 raise HTTPException(500, f"could not make the default voice: {type(exc).__name__}: {exc}") from exc
         elif like:
@@ -883,7 +1179,7 @@ def speak(req: SpeakReq):
             raise HTTPException(500, f"generation failed: {type(exc).__name__}: {exc}") from exc
         gen_s = time.time() - t0
 
-        meta = {"id": tid, "text": req.text, "language": req.language,
+        meta = {"id": tid, "text": req.text, "language": req.language, "voice": voice,
                 "instruction": "" if (ref_audio and not use_breeze) else instruction, "seed": seed,
                 **extra, "like": like, "default_voice": use_default_voice, "model": model,
                 "dry_duration_s": round(dry_s, 2), "gen_s": round(gen_s, 2)}
@@ -896,7 +1192,9 @@ def speak(req: SpeakReq):
             meta.setdefault("warnings", []).append(f"hit the model's {MAX_TAKE_S:.0f} s ceiling: the end of the text is probably "
                                 "missing. Split it into shorter takes (use --like to keep the voice).")
         take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
+        res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
+                     opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
+        _touch()
     heard = f", {res['match']['wet']:.0%} of words heard" if "match" in res else ""
     print(f"[local-voice] {time.strftime('%H:%M:%S')} {req.language} take {tid}: {res['duration_s']}s of audio "
           f"in {gen_s:.1f}s, {opt['preset']}{heard}{' - WARNING' if meta.get('warnings') else ''}", flush=True)
@@ -905,23 +1203,32 @@ def speak(req: SpeakReq):
 
 class VoiceReq(BaseModel):
     id: str
+    voice: str = DEFAULT_VOICE  # which built-in voice's Romanian lines clone this take
+
+
+class VoiceUndoReq(BaseModel):
+    voice: str = DEFAULT_VOICE
 
 
 @app.get("/api/default-voice")
-def get_default_voice():
-    return default_voice_info() or {"id": None}
+def get_default_voice(voice: str = DEFAULT_VOICE):
+    catalog_voice(voice)
+    return default_voice_info(voice) or {"id": None, "voice": voice}
 
 
 @app.post("/api/default-voice")
 def put_default_voice(req: VoiceReq):
+    catalog_voice(req.voice)
     with _lock:
-        return set_default_voice(req.id)
+        return set_default_voice(req.id, req.voice)
 
 
 @app.post("/api/default-voice/restore-previous")
-def restore_default_voice():
+def restore_default_voice(req: VoiceUndoReq | None = None):
+    voice = req.voice if req else DEFAULT_VOICE
+    catalog_voice(voice)
     with _lock:
-        return restore_previous_voice()
+        return restore_previous_voice(voice)
 
 
 @app.get("/api/settings")
@@ -938,6 +1245,8 @@ def save_settings(new: Settings):
             voicefx.load_preset(new.preset)
         except FileNotFoundError as exc:
             raise HTTPException(400, str(exc)) from exc
+    if new.voice is not None:
+        catalog_voice(new.voice)
     # Only what differs from the repo's defaults is stored: if those change in an update,
     # anything the user never chose follows along.
     given = _keep(new.model_dump(exclude_unset=True))
@@ -959,10 +1268,13 @@ def reset_settings():
 
 @app.post("/api/fx")
 def refx(req: FxReq):
-    meta = load_take(req.id)
-    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "check"))
+    load_take(req.id)  # 400/404 before waiting for the lock
+    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "blend", "double_ms", "bass_db", "check"))
     with _lock:
-        res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
+        meta = load_take(req.id)  # under the lock: a cut or undo queued before this one has landed
+        res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
+                     opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
+        _touch()
     print(f"[local-voice] {time.strftime('%H:%M:%S')} effects on take {req.id}: {opt['preset']}", flush=True)
     return {**meta, **res}
 
@@ -979,7 +1291,7 @@ def delete_take(tid: str):
     return {"id": tid, "deleted": len(files)}
 
 
-RENDER_FILE = re.compile(r"(?P<tid>[0-9]{8}-[0-9]{6}-[0-9a-f]{4})_fx-[A-Za-z0-9_.+-]+\.(wav|mp3|png)")
+RENDER_FILE = re.compile(r"(?P<tid>[0-9]{8}-[0-9]{6}-[0-9a-f]{4})_fx-[A-Za-z0-9_.+-]+\.(wav|mp3|png|json|srt)")
 
 
 @app.delete("/files/{name}")
@@ -1017,7 +1329,11 @@ def main() -> None:
     ap.add_argument("--fast", default="backbone_decode,depth_decoder,codec", help=f"comma-separated CUDA-graph stages to enable: {','.join(FAST_STAGES)}")
     ap.add_argument("--safe", action="store_true", help="eager attention, no fast paths: slow but simplest")
     ap.add_argument("--lazy", action="store_true", help="load the TTS model on the first request")
+    ap.add_argument("--idle-unload", type=float, default=15, metavar="MIN",
+                    help="standby: unload the models after this many idle minutes, freeing the GPU while the "
+                    "server keeps running (the next request reloads them, ~20 s, or ~1 min if the fast paths were never compiled); 0 = never (default 15)")
     args = ap.parse_args()
+    _settings.idle_unload = max(0.0, args.idle_unload)
     if args.safe:
         args.attn, args.fast = "eager", ""
     _settings.attn = args.attn
@@ -1042,6 +1358,9 @@ def main() -> None:
     atexit.register(lambda: PID_FILE.unlink(missing_ok=True))
     if not args.lazy:
         tts()
+    if _settings.idle_unload:
+        _touch()
+        threading.Thread(target=_standby_watch, args=(_settings.idle_unload,), daemon=True).start()
     # Loopback only, always: nothing here is meant to be reachable from the network.
     print(f"[local-voice] ready on http://127.0.0.1:{args.port}/  (stop: close this window, or stop.cmd)", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
