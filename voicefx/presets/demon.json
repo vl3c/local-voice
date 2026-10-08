@@ -1,6 +1,5 @@
 {
   "description": "Doom-style demon: the human voice pitched down with its throat enlarged, an octave-down layer and a sub rumble, a resonant metal-tube layer, parallel distortion, a mid-bass scoop. Organic and monstrous rather than mechanical.",
-  "instruction": "A huge, ancient male voice, deep resonant bass, gravelly and subterranean. Speaks slowly with cold menace and contempt, every word heavy and final.",
   "pre": [
     {
       "op": "stretch",

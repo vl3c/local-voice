@@ -189,3 +189,79 @@ def test_take_ids_must_match_exactly(app):
     from fastapi import HTTPException
     with pytest.raises(HTTPException):
         app.load_take("20260101-120000-aaaa\n")
+
+
+# ------------------------------------------------------------------ voices
+
+class FakeBreeze:
+    """Records what speak() asks the model for; returns a short buzz."""
+    sample_rate = 24000
+
+    def __init__(self):
+        self.calls = []
+
+    def synth(self, text, instruction, seed, cfg_scale, ref_audio=None, ref_text=None):
+        self.calls.append({"instruction": instruction, "seed": seed, "ref": ref_audio})
+        t = np.arange(self.sample_rate) / self.sample_rate
+        return (0.3 * np.sign(np.sin(2 * np.pi * 110 * t))).astype(np.float32), cfg_scale
+
+
+@pytest.fixture()
+def fake(app, monkeypatch):
+    engine = FakeBreeze()
+    monkeypatch.setattr(app, "tts", lambda: engine)
+    return engine
+
+
+def say(app, **body):
+    return app.speak(app.SpeakReq(**{"text": "We are the dark.", "check": False, **body}))
+
+
+def test_no_voice_means_the_default_voice_with_its_seed(app, fake):
+    r = say(app)
+    v = app.voice_catalog()[app.DEFAULT_VOICE]
+    assert fake.calls[-1]["instruction"] == v["instruction"] and fake.calls[-1]["seed"] == v["seed"]
+    assert r["voice"] == app.DEFAULT_VOICE
+
+
+def test_a_voice_brings_its_own_description_and_seed(app, fake):
+    v = app.voice_catalog()["young-woman"]
+    say(app, voice="young-woman")
+    assert fake.calls[-1] == {"instruction": v["instruction"], "seed": v["seed"], "ref": None}
+    say(app, voice="young-woman", seed=5)
+    assert fake.calls[-1]["seed"] == 5  # an explicit seed still wins
+
+
+def test_a_description_overrides_the_voice(app, fake):
+    r = say(app, voice="child", instruction="A tired robot.")
+    assert fake.calls[-1]["instruction"] == "A tired robot." and r["voice"] is None
+
+
+def test_the_saved_voice_applies_when_the_request_names_none(app, fake):
+    app.save_settings(app.Settings(voice="child"))
+    say(app)
+    assert fake.calls[-1]["instruction"] == app.voice_catalog()["child"]["instruction"]
+    assert fake.calls[-1]["seed"] == app.voice_catalog()["child"]["seed"]
+
+
+def test_unknown_voices_are_refused(app, fake):
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):
+        say(app, voice="no-such-voice")
+    with pytest.raises(HTTPException):
+        app.save_settings(app.Settings(voice="no-such-voice"))
+
+
+def test_each_voice_keeps_its_own_romanian_clone(app):
+    make_take(app, "20260101-120000-aaaa", f0=65)
+    make_take(app, "20260101-120000-bbbb", f0=280)
+    app.set_default_voice("20260101-120000-aaaa")
+    app.set_default_voice("20260101-120000-bbbb", "child")
+    assert app.default_voice_info()["id"] == "20260101-120000-aaaa"
+    assert app.default_voice_info("child")["id"] == "20260101-120000-bbbb"
+    assert app.default_voice_info("young-woman") == {}
+
+
+def test_presets_no_longer_carry_a_voice():
+    import voicefx
+    assert all("instruction" not in p for p in voicefx.list_presets().values())

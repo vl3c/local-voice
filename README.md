@@ -80,12 +80,29 @@ are two stages:
 Pitch-shifting and distorting a human voice instead gives you a Doom-style demon: organic, not
 mechanical. That version is kept as the `demon` preset for comparison.
 
+### Voices: who speaks
+
+Who speaks and what processes it are chosen separately: any voice works with any preset.
+The built-in voices (`server/voices.json`, `say.py --voices`) are each a description and a seed
+picked by ear:
+
+| Voice | |
+|---|---|
+| `ancient-male` | The Reaper voice and the default: ~65 Hz, slow and cold. |
+| `ancient-female` | A low, cold, vast female voice (~125 Hz); dark, so brightened for the machine automatically. |
+| `young-woman` | Calm and clear (~190 Hz); lovely blended half machine, half human. |
+| `child` | An eerily calm child (~285 Hz). |
+| `old-frail` | A frail, breathy old man (~100 Hz). |
+
+Or write your own description (`instruction`) instead. Add a voice by adding an entry to
+`server/voices.json`: a description and a seed whose voice you like.
+
 ### Two engines, one voice
 
 | Language | Engine | How the voice is chosen |
 |---|---|---|
-| English (`en`) | Breeze TTS 2 | a free-text description (`instruction`), strength `cfg_scale` |
-| Romanian (`ro`) | OmniVoice | by default it **clones the default voice** (below); or fixed attributes, comma-separated, e.g. `male, elderly, very low pitch`; the model's pace via `speed` (0.75-1.3, default 0.9) |
+| English (`en`) | Breeze TTS 2 | a built-in voice (`voice`), or your own free-text description (`instruction`); strength `cfg_scale` |
+| Romanian (`ro`) | OmniVoice | by default it **clones the chosen voice** (below); or fixed attributes, comma-separated, e.g. `male, elderly, very low pitch`; the model's pace via `speed` (0.75-1.3, default 0.9) |
 
 OmniVoice needs a newer `transformers` than Breeze allows, so it lives in its own venv
 (`.venv-ro`) and the server runs it as a child process (`server/omni_worker.py`), started on the
@@ -101,14 +118,16 @@ with a short pause. The same paragraph then came out complete on every seed trie
 sentence still misses words after 3 tries carries a warning. Below `speed` 0.75 the model starts
 repeating words to fill the time it's given, so the slowest settings are `tempo`'s job.
 
-**The default voice.** OmniVoice's own deepest design ("very low pitch") lands around 100-130 Hz,
-which sounds small under the Reaper presets. Breeze's English Reaper voice sits near 65 Hz. So
-by default Romanian lines **clone the default voice**: an English take. If there isn't one, the
-first Romanian line makes it with Breeze, trying its own seeds until the voice lands under 75 Hz
-(seed 12 gives ~65 Hz; unrelated to the default seed for takes), and stores a copy in `voices\` (safe from clearing `output\`). Cloned Romanian keeps that depth
-(66-69 Hz measured) and Whisper still transcribes it perfectly. Set your own with **Set as
-default voice** on any take, or `say.py --default-voice <take>`. Whisper can't judge accent, so
-listen for English colouring in cloned Romanian.
+**Romanian clones the chosen voice.** OmniVoice's own deepest design ("very low pitch") lands
+around 100-130 Hz, which sounds small under the Reaper presets. Breeze's English Reaper voice sits
+near 65 Hz. So by default Romanian lines **clone an English take of the chosen voice**, stored in
+`voices\` (safe from clearing `output\`) and made on first use: for `ancient-male`, the
+**default voice**, Breeze tries its own seeds until the voice lands under 75 Hz (seed 12 gives
+~65 Hz); for any other voice, one take from its description and seed. Cloned Romanian keeps that
+depth (66-69 Hz measured) and Whisper still transcribes it perfectly. Replace a voice's clone
+with **Set as Romanian voice** on any take (for the voice selected), or
+`say.py --default-voice <take> [--voice NAME]`. Whisper can't judge accent, so listen for
+English colouring in cloned Romanian.
 
 **Clone voice for next lines / `--like` works across engines and languages** too: any take's voice can
 speak either language. In English, `--like` without `--instruction` is a pure clone; with one,
@@ -195,9 +214,9 @@ first time). `say.py --unload` (API: `POST /api/unload`) does it at once. Change
 
 ### Command line (what agents use)
 
-**Defaults.** With nothing but the text, you get the default voice: the `reaper-drone` preset at
-strength 6 (`--cfg 6`), seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
-tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
+**Defaults.** With nothing but the text, you get the `ancient-male` voice (its seed, `74525861`,
+picked by ear) through the `reaper-drone` preset at strength 6 (`--cfg 6`), Romanian speed 0.9, a
+light room (`reverb room`), pitch 0, tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
 per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
 take, `--no-check` (API: `"check": false`) to skip the check.
 
@@ -218,8 +237,9 @@ python scripts\say.py --presets
 |---|---|
 | `--preset NAME` | Effects preset (default `reaper-drone`). |
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
-| `--instruction "..."` | The voice description. English: free text, default the preset's suggested one, `""` for none. Romanian: attributes such as `male, elderly, very low pitch`; omitted means clone the default voice. |
-| `--seed N` | Reproduces a take exactly. Default: the default seed, 74525861. `random` for a new voice. |
+| `--voice NAME` | Who speaks: a built-in voice (`--voices` lists them; default `ancient-male`), with its own description and seed. Romanian: a clone of that voice. |
+| `--instruction "..."` | Your own voice description instead. English: free text, `""` for none. Romanian: attributes such as `male, elderly, very low pitch`; omitted means clone the chosen voice. |
+| `--seed N` | Reproduces a take exactly. Default: the voice's own seed. `random` for a new voice. |
 | `--cfg X` | English only: how hard the model follows the instruction (default 6; Breeze recommends 4; range 0.5-10). |
 | `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Slower than that: `--tempo`. |
 | `--pitch N` | Semitones, -12..12, on the finished sound (e.g. -4 for lower and bigger). |
@@ -264,7 +284,8 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 |---|---|---|
 | `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
-| `GET /api/presets` | | names, descriptions, suggested voice descriptions |
+| `GET /api/presets` | | names and descriptions |
+| `GET /api/voices` | | the built-in voices: name, description, seed, and each one's Romanian clone |
 | `GET /api/health` | | which models are loaded, `standby`, idle seconds, VRAM |
 | `POST /api/unload` | | free the GPU: drop every model, keep running (standby) |
 | `GET` / `POST /api/default-voice` | `{"id"}` to set | the default voice: source take id, text, median pitch, `previous` |
@@ -274,8 +295,9 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 | `DELETE /files/<take>_fx-...` | | delete one rendered file (what `--fx --no-save` does); a take's dry voice and record can't be deleted this way |
 | `GET /files/<name>` | | a WAV, MP3 or PNG from `output/` |
 
-`instruction` omitted means: English, the preset's suggested description; Romanian, clone the
-default voice (made on first use). In English `""` means none (plain TTS, or a pure clone with
+`voice` and `instruction` omitted mean the saved or built-in voice (`ancient-male`): English, its
+description and seed; Romanian, a clone of it (made on first use). `/api/default-voice` and
+`/api/default-voice/restore-previous` take a `voice` (default `ancient-male`). In English `""` means none (plain TTS, or a pure clone with
 `like`). Bad input (unknown language, preset or reverb, a seed outside 0..2^32-1, blank text)
 is a 4xx with a message, not a 500. Requests must use Host `127.0.0.1` or `localhost`.
 
@@ -321,12 +343,12 @@ subtitles for an editor's timeline. `--out` delivers both as `<name>_words.json`
 
 ### The page
 
-The page at http://127.0.0.1:8190/ does the same: text, language, preset (which loads its
-suggested voice description), voice description, seed, strength (English) or speed (Romanian),
+The page at http://127.0.0.1:8190/ does the same: text, language, voice (who speaks: fills in
+its description and seed; editing the description makes it your own), effects preset, seed, strength (English) or speed (Romanian),
 pitch, tempo, reverb, **Transcribe + spectrogram**, and per take: **WAV** / **MP3** / **voice WAV** download
 links, an **Effects** box (another preset, pitch, tempo or reverb on the same take, no
-regeneration), **Clone voice for next lines** (later lines clone it, in either language), **Set as default
-voice** (what Romanian clones when the voice attributes are left empty) and **Load settings**
+regeneration), **Clone voice for next lines** (later lines clone it, in either language), **Set as Romanian
+voice** (what Romanian lines with the selected voice clone when the attributes are left empty) and **Load settings**
 (copy the take's settings back into the panel). Hover over any control for 1 s for an
 explanation. `Ctrl+Enter` speaks.
 

@@ -1,6 +1,5 @@
 {
   "description": "Sovereign-style Reaper, mechanical: a brass machine tone does all the speaking. A vocoder drives a detuned sawtooth stack with scraped-metal partials at F1 (43.65 Hz), loosely following the voice's intonation (follow 0.3); no human voice in the mix. Brassy grit and a metal-tube resonance. Turn on the 'articulation' bus for a trace of human consonants.",
-  "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
   "pre": [
     {
       "op": "stretch",

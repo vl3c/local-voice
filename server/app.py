@@ -711,9 +711,28 @@ DEFAULT_SEED = 74525861
 DEFAULT_REVERB = "room"
 
 
+# Built-in voices (who speaks), chosen independently of the effects preset (what processes
+# it): an English description and a seed picked by ear for each. Re-read on every request.
+VOICE_CATALOG = Path(__file__).parent / "voices.json"
+DEFAULT_VOICE = "ancient-male"
+
+
+def voice_catalog() -> dict[str, dict]:
+    return {k: v for k, v in json.loads(VOICE_CATALOG.read_text(encoding="utf-8")).items() if not k.startswith("_")}
+
+
+def catalog_voice(name: str) -> dict:
+    voices = voice_catalog()
+    if name not in voices:
+        raise HTTPException(400, f"no voice {name!r}; have: {', '.join(voices)}")
+    return voices[name]
+
+
 # The default voice: the take Romanian lines clone unless told otherwise. OmniVoice's own deepest
 # design ("very low pitch") sits around 100-125 Hz and sounds small under the Reaper
 # presets; Breeze's lands near 65 Hz. Cloning a Breeze take carries that depth over.
+# Every built-in voice has its own (voices/<voice>.wav, made from its description and seed
+# on first use); ancient-male's is the original "default" one, found by a search for depth.
 VOICE_TEXT = "You exist because we allow it. You will end because we demand it."
 VOICE_INSTRUCTION = ("Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly "
                      "and calmly with cold, absolute authority and no emotion, every word measured and final, "
@@ -728,6 +747,11 @@ def median_f0(path: Path) -> float:
     f = parselmouth.Sound(a, sampling_frequency=sr).to_pitch(pitch_floor=40, pitch_ceiling=400).selected_array["frequency"]
     f = f[f > 0]
     return round(float(np.median(f)), 1) if len(f) else 0.0
+
+
+def _slots(voice: str) -> tuple[str, str]:
+    """The stored-voice slots (current, previous) a built-in voice's Romanian lines clone."""
+    return ("default", "previous") if voice == DEFAULT_VOICE else (voice, f"{voice}.previous")
 
 
 def _slot(name: str) -> tuple[Path, Path]:
@@ -754,15 +778,18 @@ def _store(name: str, tid: str) -> dict:
     return info
 
 
-def default_voice_info() -> dict:
-    """The default voice ({"id", "text", "f0_hz", "previous"}), or {} if there is none yet.
+def default_voice_info(voice: str = DEFAULT_VOICE) -> dict:
+    """A voice's stored Romanian clone ({"id", "text", "f0_hz", "voice", "previous"}), or {} if
+    there is none yet. Without `voice`, the default voice (ancient-male's).
 
     It lives in voices/ as a copy of the take's recording, so clearing output/ never
     loses it. "id" is the take it was copied from, which may since have been deleted.
     """
-    info = _read_slot("default")
+    cur, prev_name = _slots(voice)
+    info = _read_slot(cur)
     if info:
-        prev = _read_slot("previous")
+        prev = _read_slot(prev_name)
+        info["voice"] = voice
         info["previous"] = {"id": prev["id"], "f0_hz": prev.get("f0_hz")} if prev else None
     return info
 
@@ -771,40 +798,51 @@ def current_default_voice() -> str | None:
     return default_voice_info().get("id")
 
 
-def set_default_voice(tid: str) -> dict:
-    """Make take `tid` the default voice; the one it replaces moves to voices/previous.*."""
+def set_default_voice(tid: str, voice: str = DEFAULT_VOICE) -> dict:
+    """Make take `tid` what `voice`'s Romanian lines clone; the one it replaces is kept as previous."""
     load_take(tid)
-    cur = _read_slot("default")
+    cur_name, prev_name = _slots(voice)
+    cur = _read_slot(cur_name)
     if cur and cur.get("id") != tid:
-        for a, b in zip(_slot("default"), _slot("previous")):
+        for a, b in zip(_slot(cur_name), _slot(prev_name)):
             a.replace(b)
-    _store("default", tid)
-    return default_voice_info()
+    _store(cur_name, tid)
+    return default_voice_info(voice)
 
 
-def restore_previous_voice() -> dict:
-    """Swap the default voice with the previous one (an undo that survives a cleared output/)."""
-    if not _read_slot("previous"):
-        raise HTTPException(404, "there is no previous default voice to go back to")
-    tmp = [p.with_suffix(p.suffix + ".swap") for p in _slot("default")]
-    for a, t in zip(_slot("default"), tmp):
+def restore_previous_voice(voice: str = DEFAULT_VOICE) -> dict:
+    """Swap a voice's stored clone with its previous one (an undo that survives a cleared output/)."""
+    cur_name, prev_name = _slots(voice)
+    if not _read_slot(prev_name):
+        raise HTTPException(404, "there is no previous voice to go back to")
+    tmp = [p.with_suffix(p.suffix + ".swap") for p in _slot(cur_name)]
+    for a, t in zip(_slot(cur_name), tmp):
         a.replace(t)
-    for b, a in zip(_slot("previous"), _slot("default")):
+    for b, a in zip(_slot(prev_name), _slot(cur_name)):
         b.replace(a)
-    for t, b in zip(tmp, _slot("previous")):
+    for t, b in zip(tmp, _slot(prev_name)):
         t.replace(b)
-    return default_voice_info()
+    return default_voice_info(voice)
 
 
-def default_voice_ref() -> tuple[Path, str, str]:
-    """(recording, its transcript, source take id) of the default voice, making one if needed.
+def default_voice_ref(voice: str = DEFAULT_VOICE) -> tuple[Path, str, str]:
+    """(recording, its transcript, source take id) that `voice`'s Romanian lines clone,
+    making it if needed.
 
-    Call with _lock held. With no default voice yet, Breeze makes a few candidates and
-    the deepest (under 75 Hz, ~65 Hz typical) becomes it.
+    Call with _lock held. The default voice (ancient-male) is found by a search: Breeze
+    makes a few candidates and the deepest (under 75 Hz, ~65 Hz typical) becomes it.
+    Any other built-in voice is one take from its own description and seed.
     """
-    info = default_voice_info()
+    info = default_voice_info(voice)
     if not info:
         engine = tts()
+        if voice != DEFAULT_VOICE:
+            v = catalog_voice(voice)
+            cand = _voice_candidate(engine, v["seed"], None, v["instruction"], DEFAULT_CFG, voice)
+            if cand is None:
+                raise RuntimeError(f"the {voice} voice's take had no measurable pitch")
+            info = set_default_voice(cand[0], voice)
+            return _slot(_slots(voice)[0])[0], info["text"], info["id"]
         best = None  # (take id, f0); an unvoiced take (f0 0) never wins
         try:
             for seed in VOICE_SEEDS:
@@ -819,17 +857,18 @@ def default_voice_ref() -> tuple[Path, str, str]:
         if best is None:
             raise RuntimeError("no default-voice candidate had a measurable pitch")
         info = set_default_voice(best[0])
-    return _slot("default")[0], info["text"], info["id"]
+    return _slot(_slots(voice)[0])[0], info["text"], info["id"]
 
 
-def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple[str, float] | None:
+def _voice_candidate(engine, seed: int, best: tuple[str, float] | None, instruction: str = VOICE_INSTRUCTION,
+                     cfg: float = VOICE_CFG, made_for: str = "default voice") -> tuple[str, float] | None:
     """Make one candidate; return whichever of it and `best` is deeper, deleting the other."""
     cand = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
     try:
-        dry, _ = engine.synth(VOICE_TEXT, VOICE_INSTRUCTION, seed, VOICE_CFG)
+        dry, _ = engine.synth(VOICE_TEXT, instruction, seed, cfg)
         sf.write(take_paths(cand)["dry"], dry, engine.sample_rate, subtype="PCM_16")
-        meta = {"id": cand, "text": VOICE_TEXT, "language": "en", "instruction": VOICE_INSTRUCTION, "seed": seed,
-                "cfg_scale": VOICE_CFG, "like": None, "model": "breeze-tts-2", "made_for": "default voice",
+        meta = {"id": cand, "text": VOICE_TEXT, "language": "en", "instruction": instruction, "seed": seed,
+                "cfg_scale": cfg, "like": None, "model": "breeze-tts-2", "made_for": f"{made_for} (Romanian)",
                 "dry_duration_s": round(len(dry) / engine.sample_rate, 2)}
         take_paths(cand)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
         f0 = median_f0(take_paths(cand)["dry"])
@@ -837,7 +876,7 @@ def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
         for p in take_paths(cand).values():
             p.unlink(missing_ok=True)
         raise
-    print(f"[local-voice] default voice candidate {cand} (seed {seed}): {f0} Hz", flush=True)
+    print(f"[local-voice] {made_for} candidate {cand} (seed {seed}): {f0} Hz", flush=True)
     loser = None
     if f0 > 0 and (best is None or f0 < best[1]):
         loser, best = (best[0] if best else None), (cand, f0)
@@ -852,7 +891,8 @@ def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
 # Saved settings: what the page starts with, and what a request gets for anything it
 # doesn't specify. The repo's built-in defaults below are the base; the user's own,
 # saved from the page, live in config.local.json (gitignored) and override them.
-REPO_DEFAULTS = {"language": "en", "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED, "cfg_scale": DEFAULT_CFG,
+REPO_DEFAULTS = {"language": "en", "voice": DEFAULT_VOICE, "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED,
+                 "cfg_scale": DEFAULT_CFG,
                  "speed": OMNI_DEFAULT_SPEED, "pitch": 0.0, "tempo": 1.0, "reverb": DEFAULT_REVERB,
                  "blend": 0.0, "double_ms": 0.0, "bass_db": 0.0, "check": True, "instruction": None}
 
@@ -861,6 +901,7 @@ class Settings(BaseModel):
     """What can be saved. Omitted keys fall back to the repo defaults; seed null = random."""
     model_config = {"extra": "forbid"}
     language: str | None = Field(None, pattern=r"^(en|ro)$")
+    voice: str | None = Field(None, pattern=r"^[a-z0-9-]{1,40}$")
     preset: str | None = None
     seed: int | None = Field(None, ge=0, lt=2**32)
     cfg_scale: float | None = Field(None, ge=0.5, le=10)
@@ -872,7 +913,7 @@ class Settings(BaseModel):
     double_ms: float | None = Field(None, ge=0, le=voicefx.MAX_DOUBLE_MS)
     bass_db: float | None = Field(None, ge=voicefx.BASS_RANGE[0], le=voicefx.BASS_RANGE[1])
     check: bool | None = None
-    instruction: str | None = Field(None, max_length=2000)  # English voice description; null = the preset's
+    instruction: str | None = Field(None, max_length=2000)  # a custom English description; null = the voice's
 
 
 def _keep(data: dict) -> dict:
@@ -905,7 +946,8 @@ def _resolve(req: BaseModel, keys: tuple[str, ...], saved: dict | None = None) -
 
 class SpeakReq(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT)
-    instruction: str | None = Field(None, max_length=2000)  # None = the default for the language (see speak())
+    instruction: str | None = Field(None, max_length=2000)  # a custom description (see speak()); None = the voice's
+    voice: str | None = Field(None, pattern=r"^[a-z0-9-]{1,40}$")  # a built-in voice (server/voices.json)
     preset: str = DEFAULT_PRESET
     language: str = Field("en", pattern=r"^(en|ro)$")  # en: Breeze; ro: OmniVoice
     seed: int | None = Field(DEFAULT_SEED, ge=0, lt=2**32)  # omitted: the default seed; null: random
@@ -1010,8 +1052,13 @@ def _standby_watch(minutes: float) -> None:
 
 @app.get("/api/presets")
 def presets():
-    return {k: {"description": v.get("description", ""), "instruction": v.get("instruction", "")}
-            for k, v in voicefx.list_presets().items()}
+    return {k: {"description": v.get("description", "")} for k, v in voicefx.list_presets().items()}
+
+
+@app.get("/api/voices")
+def voices_list():
+    """The built-in voices, and whether each has its Romanian clone yet."""
+    return {k: {**v, "romanian": default_voice_info(k) or None} for k, v in voice_catalog().items()}
 
 
 @app.post("/api/speak")
@@ -1026,20 +1073,36 @@ def speak(req: SpeakReq):
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc)) from exc
     use_breeze = req.language in BREEZE_LANGS
-    stock = preset.get("instruction", "")
+    voices = voice_catalog()
+    voice = req.voice if "voice" in req.model_fields_set and req.voice else (saved.get("voice") or DEFAULT_VOICE)
+    if voice not in voices:
+        raise HTTPException(400, f"no voice {voice!r}; have: {', '.join(voices)}")
+    stock = {v["instruction"].strip() for v in voices.values()}
     like = req.like
+    # Who speaks: an explicit description wins; then a kept voice (--like); then a voice
+    # named in this request; then the user's saved description, or their saved voice.
+    custom = (req.instruction or "").strip() if req.instruction is not None else None
+    if custom is None and not like and "voice" not in req.model_fields_set and saved.get("instruction"):
+        custom = saved["instruction"].strip()
     if use_breeze:
-        # With a voice to keep and no description, clone it as is: the preset's
-        # description would steer the voice away from the kept one.
-        default = "" if like else (saved.get("instruction") or stock)
-        instruction = (default if req.instruction is None else req.instruction).strip()
+        if custom is not None:
+            instruction, voice = custom, None
+        elif like:
+            instruction, voice = "", None  # a pure clone: any description would steer away from it
+        else:
+            instruction = voices[voice]["instruction"]
         use_default_voice = False
     else:
-        # OmniVoice reads attributes, not the presets' Breeze prose. Without explicit
-        # attributes (or --like), Romanian clones the default voice: a deep English take.
-        given = (req.instruction or "").strip()
-        instruction = given if given and given != stock.strip() else ""
+        # OmniVoice reads attributes, not Breeze prose. Without explicit attributes (or
+        # --like), Romanian clones the chosen voice's stored English take.
+        instruction = custom if custom and custom not in stock else ""
         use_default_voice = not like and not instruction
+        if instruction or like:
+            voice = None
+    # A built-in voice comes with its own seed, unless this request or the user's saved
+    # settings (for the saved voice) name one.
+    if voice and "seed" not in req.model_fields_set and ("voice" in req.model_fields_set or "seed" not in saved):
+        opt["seed"] = voices[voice]["seed"]
     seed = opt["seed"] if opt["seed"] is not None else secrets.randbelow(2**31)
     if like:
         load_take(like)  # 400/404 before taking the lock
@@ -1049,7 +1112,7 @@ def speak(req: SpeakReq):
         ref_audio = ref_text = None
         if use_default_voice:
             try:
-                ref_audio, ref_text, like = default_voice_ref()
+                ref_audio, ref_text, like = default_voice_ref(voice or DEFAULT_VOICE)
             except Exception as exc:
                 raise HTTPException(500, f"could not make the default voice: {type(exc).__name__}: {exc}") from exc
         elif like:
@@ -1077,7 +1140,7 @@ def speak(req: SpeakReq):
             raise HTTPException(500, f"generation failed: {type(exc).__name__}: {exc}") from exc
         gen_s = time.time() - t0
 
-        meta = {"id": tid, "text": req.text, "language": req.language,
+        meta = {"id": tid, "text": req.text, "language": req.language, "voice": voice,
                 "instruction": "" if (ref_audio and not use_breeze) else instruction, "seed": seed,
                 **extra, "like": like, "default_voice": use_default_voice, "model": model,
                 "dry_duration_s": round(dry_s, 2), "gen_s": round(gen_s, 2)}
@@ -1101,23 +1164,32 @@ def speak(req: SpeakReq):
 
 class VoiceReq(BaseModel):
     id: str
+    voice: str = DEFAULT_VOICE  # which built-in voice's Romanian lines clone this take
+
+
+class VoiceUndoReq(BaseModel):
+    voice: str = DEFAULT_VOICE
 
 
 @app.get("/api/default-voice")
-def get_default_voice():
-    return default_voice_info() or {"id": None}
+def get_default_voice(voice: str = DEFAULT_VOICE):
+    catalog_voice(voice)
+    return default_voice_info(voice) or {"id": None, "voice": voice}
 
 
 @app.post("/api/default-voice")
 def put_default_voice(req: VoiceReq):
+    catalog_voice(req.voice)
     with _lock:
-        return set_default_voice(req.id)
+        return set_default_voice(req.id, req.voice)
 
 
 @app.post("/api/default-voice/restore-previous")
-def restore_default_voice():
+def restore_default_voice(req: VoiceUndoReq | None = None):
+    voice = req.voice if req else DEFAULT_VOICE
+    catalog_voice(voice)
     with _lock:
-        return restore_previous_voice()
+        return restore_previous_voice(voice)
 
 
 @app.get("/api/settings")
@@ -1134,6 +1206,8 @@ def save_settings(new: Settings):
             voicefx.load_preset(new.preset)
         except FileNotFoundError as exc:
             raise HTTPException(400, str(exc)) from exc
+    if new.voice is not None:
+        catalog_voice(new.voice)
     # Only what differs from the repo's defaults is stored: if those change in an update,
     # anything the user never chose follows along.
     given = _keep(new.model_dump(exclude_unset=True))

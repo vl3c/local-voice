@@ -114,6 +114,7 @@ Run the CLI with any Python 3 (standard library only):
 ```bash
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --check --wait 180 --out <dir>
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --preset harbinger --seed 7 --check --out <dir>
+python ~/.claude/skills/local-voice/scripts/say.py "<text>" --voice ancient-female --blend 0.4 --check --out <dir>
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --instruction "<voice description>" --check --out <dir>
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --like <take id> --check --out <dir>
 python ~/.claude/skills/local-voice/scripts/say.py --fx <take id> --preset harbinger --pitch -4 --reverb hall --out <dir>
@@ -121,11 +122,12 @@ python ~/.claude/skills/local-voice/scripts/say.py "<romanian text>" --lang ro -
 python ~/.claude/skills/local-voice/scripts/say.py "<romanian text>" --lang ro --like <take id> --tempo 0.85 --check --out <dir>
 python ~/.claude/skills/local-voice/scripts/say.py "<text>" --format mp3 --out <dir>     # for WhatsApp / messengers
 python ~/.claude/skills/local-voice/scripts/say.py --presets
+python ~/.claude/skills/local-voice/scripts/say.py --voices
 ```
 
-**Defaults.** With nothing but the text, you get the default voice: the `reaper-drone` preset at
-strength 6 (`--cfg 6`), seed `74525861` (a voice picked by ear), Romanian speed 0.9, a light room (`reverb room`), pitch 0,
-tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
+**Defaults.** With nothing but the text, you get the `ancient-male` voice (seed `74525861`, picked
+by ear) through the `reaper-drone` preset at strength 6 (`--cfg 6`), Romanian speed 0.9, a light
+room (`reverb room`), pitch 0, tempo 1, and the Whisper check on. The page starts with the same settings. Override any of them
 per request; `--seed random` (API: `"seed": null`) for a fresh voice, `--reverb none` for a dry
 take, `--no-check` (API: `"check": false`) to skip the check.
 
@@ -133,8 +135,9 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 |---|---|
 | `--preset NAME` | Effects preset (default `reaper-drone`). `--presets` lists them. See the table below. |
 | `--lang CODE` | `en` (default): Breeze. `ro`: OmniVoice. |
-| `--instruction "..."` | The voice description. English: free text, default the preset's suggested one (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the default voice (the default, and the deep one); or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
-| `--seed N` | Reproduces a take exactly. Default: the default seed `74525861`; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
+| `--voice NAME` | Who speaks, independent of the preset: `ancient-male` (default, the Reaper), `ancient-female`, `young-woman`, `child`, `old-frail` (`--voices` describes them). Each brings its own description and seed. In Romanian, a clone of that voice. |
+| `--instruction "..."` | Your own voice description instead of `--voice`. English: free text (with `--like`, default is a pure clone; an explicit description steers the kept voice's delivery). Romanian: omit it to clone the chosen voice; or comma-separated attributes, one per group: gender `male`/`female`; age `child`, `teenager`, `young adult`, `middle-aged`, `elderly`; pitch `very low pitch` ... `very high pitch`; style `whisper`. Unknown attributes are an error. |
+| `--seed N` | Reproduces a take exactly. Default: the voice's own seed; `random` for a new voice (do that when the user wants alternatives). Printed every time; note it for keepers. |
 | `--cfg X` | English only: how hard the model follows the instruction (default 6, the default style; Breeze recommends 4; 0.5-10; much above 6 can sound forced). |
 | `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Below 0.75 it repeats words, so the server refuses it: use `--tempo` for slower. |
 | `--pitch N` | Semitones, -12..12, on the finished sound: negative is lower and bigger (tone and "throat" move together). -3 to -5 is a good start. |
@@ -144,7 +147,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--bass DB` | Shelve the bass under 150 Hz, -12..6 dB. Use `-6` when a take warns that the words sit low under the bass. Works with `--fx`. |
 | `--trim-tail` / `--no-trim-tail` | Cut stray sound after the last word (an "mmm", a breath) when a take warns about it; the take remembers the cut for later `--fx` renders. Listen first: the warning says voiced (likely an "mmm") or breath. |
 | `--reverb KIND` | `none` (dry: for a take that will get its own room in a mix), `room` (default), `hall`, `cathedral`. |
-| `--default-voice [TAKE]` | Show the default voice, set it to TAKE (only when the user asks), or `previous` to undo. |
+| `--default-voice [TAKE]` | Show what Romanian lines clone for `--voice` (default `ancient-male`: the default voice), set it to TAKE (only when the user asks), or `previous` to undo. |
 | `--settings` | Show the defaults in effect: the user may have saved their own (`config.local.json`), which every request without that option uses. Check it before assuming the built-in defaults. |
 | `--like TAKE` | Keep an earlier take's voice for a new line: use it for multi-line scenes so every line sounds like the same Reaper. Works across languages: Romanian lines can clone an English take's voice (and the reverse). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
@@ -193,9 +196,10 @@ lines with `--like`.
 
 ## Romanian
 
-- **Romanian clones the default voice by default** (no `--instruction`, no `--like`): a deep
-  English Breeze take (~65 Hz), made automatically on the first Romanian line (~30 s once) and
-  stored as a copy in `voices/` (safe from clearing `output/`). Why: OmniVoice's own "very low pitch" lands around
+- **Romanian clones the chosen voice by default** (no `--instruction`, no `--like`): an English
+  Breeze take of that voice, made automatically on its first Romanian line (~30 s once for the
+  deep `ancient-male` default voice, ~65 Hz) and stored as a copy in `voices/` (safe from
+  clearing `output/`). `--voice ancient-female --lang ro` speaks Romanian as the ancient female. Why: OmniVoice's own "very low pitch" lands around
   100-130 Hz, which sounds too small next to the English takes. `--default-voice`
   shows it; `--default-voice <take>` sets it (pick a deep English take). Only design Romanian
   voices from attributes if the user wants a different voice, and say it will sound higher.

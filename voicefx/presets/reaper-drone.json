@@ -1,6 +1,5 @@
 {
   "description": "The Reaper as a speaking drone: like 'reaper' but the machine's pitch never moves (follow 0), so every word is the same colossal brass drone, shaped only by the words.",
-  "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
   "pre": [
     {
       "op": "stretch",

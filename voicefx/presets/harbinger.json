@@ -1,6 +1,5 @@
 {
   "description": "Harbinger-style: a machine imitating speech. A vocoded synth chord (root, fifth, octave) follows the voice's intonation but snaps it to whole semitones, so the melody steps like a synthesiser; ring-mod shimmer and heavy distortion.",
-  "instruction": "An immense, ancient male voice, deep and gravelly with a hard, metallic edge. Speaks slowly with contempt and total certainty, cold and commanding, each word heavy and deliberate.",
   "pre": [
     {
       "op": "stretch",

@@ -2,7 +2,9 @@
 
 The server must be running (start.cmd). Everything stays on 127.0.0.1.
 
-    python scripts/say.py "We are the dark."              # defaults: reaper-drone, strength 6, seed 74525861, light room
+    python scripts/say.py "We are the dark."              # defaults: ancient-male voice, reaper-drone, strength 6, light room
+    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4  # another voice, part human
+    python scripts/say.py --voices                                      # the built-in voices
     python scripts/say.py "We are the dark." --seed random --reverb none --no-check
     python scripts/say.py "..." --instruction "An ancient, colossal voice..." --seed 7
     python scripts/say.py "..." --preset harbinger --check --out some/dir
@@ -127,8 +129,10 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("text", nargs="?", help="what to say (English; (sigh)-style vocal events allowed)")
-    ap.add_argument("--instruction", help="voice description. English: default the preset's suggested one ('' for "
-                    "none; with --like, default is a pure clone). Romanian: attributes; default clones the default voice")
+    ap.add_argument("--voice", help="who speaks: a built-in voice (--voices lists them; default ancient-male), "
+                    "with its own description and seed. In Romanian, a clone of that voice")
+    ap.add_argument("--instruction", help="a voice description of your own instead of --voice. English: free text "
+                    "('' for none; with --like, default is a pure clone). Romanian: attributes")
     ap.add_argument("--preset", help="effects preset (default: reaper-drone)")
     ap.add_argument("--lang", default="en", choices=["en", "ro"], help="en (default): Breeze TTS 2; ro: OmniVoice")
     ap.add_argument("--speed", type=float, help="Romanian only: the model's speaking rate, 0.75-1.3, default 0.9 "
@@ -159,6 +163,7 @@ def main() -> int:
     ap.add_argument("--no-check", dest="check", action="store_false", help="skip the transcription check")
     ap.add_argument("--fx", metavar="TAKE", help="re-run effects on an earlier take; no new generation")
     ap.add_argument("--presets", action="store_true", help="list presets and exit")
+    ap.add_argument("--voices", action="store_true", help="list the built-in voices and exit")
     ap.add_argument("--default-voice", dest="default_voice", nargs="?", const="", metavar="TAKE",
                     help="show the default voice (what Romanian clones unless told otherwise), set it to TAKE, "
                     "or 'previous' to undo the last change")
@@ -184,8 +189,9 @@ def main() -> int:
 
     if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
         ap.error("--seed takes a number or 'random'")
-    if not (args.text or args.fx or args.presets or args.default_voice is not None or args.settings or args.unload):
-        ap.error("give the text to say, or --fx TAKE, --presets, --settings, --default-voice or --unload")
+    if not (args.text or args.fx or args.presets or args.default_voice is not None or args.settings or args.unload
+            or args.voices):
+        ap.error("give the text to say, or --fx TAKE, --presets, --voices, --settings, --default-voice or --unload")
     if not wait_for_server(args.wait):
         print(f"No server at {SERVER}. Start it with start.cmd (or start.cmd --no-browser).")
         return 1
@@ -197,7 +203,13 @@ def main() -> int:
         return 0
     if args.presets:
         for k, v in call("/api/presets").items():
-            print(f"{k}\n  {v['description']}\n  voice: {v['instruction'] or '(none)'}\n")
+            print(f"{k}\n  {v['description']}\n")
+        return 0
+    if args.voices:
+        for k, v in call("/api/voices").items():
+            ro = f"take {v['romanian']['id']}" if v.get("romanian") else "made on first use"
+            print(f"{k}  ({v['name']}, seed {v['seed']})\n  {v.get('about', '')}\n  {v['instruction']}\n"
+                  f"  Romanian clone: {ro}\n")
         return 0
     if args.settings:
         st = call("/api/settings")
@@ -206,18 +218,21 @@ def main() -> int:
         for k, v in st["effective"].items():
             mark = "  (saved)" if k in st["saved"] else ""
             shown = ("random" if (k == "seed" and v is None) else
-                     "the preset's (English; Romanian clones the default voice)" if (k == "instruction" and not v) else v)
+                     "the voice's (Romanian clones it)" if (k == "instruction" and not v) else v)
             print(f"  {k:12s} {shown}{mark}")
         return 0
     if args.default_voice is not None:
+        voice = args.voice or "ancient-male"
         if args.default_voice.lower() == "previous":
-            h = call("/api/default-voice/restore-previous", {})
+            h = call("/api/default-voice/restore-previous", {"voice": voice})
+        elif args.default_voice:
+            h = call("/api/default-voice", {"id": args.default_voice, "voice": voice})
         else:
-            h = call("/api/default-voice", {"id": args.default_voice} if args.default_voice else None)
+            h = call(f"/api/default-voice?voice={voice}")
         if not h.get("id"):
-            print("no default voice yet: the first Romanian line without --instruction or --like makes one")
+            print(f"no Romanian clone of {voice} yet: the first Romanian line with that voice makes one")
         else:
-            print(f"default voice: take {h['id']} ({h['f0_hz']} Hz median pitch)")
+            print(f"Romanian lines with {voice} clone take {h['id']} ({h['f0_hz']} Hz median pitch)")
             if h.get("previous"):
                 p = h["previous"]
                 print(f"previous: take {p['id']} ({p.get('f0_hz')} Hz); restore it with --default-voice previous")
@@ -228,7 +243,7 @@ def main() -> int:
                                      "blend": args.blend, "double_ms": args.double, "bass_db": args.bass,
                                      "trim_tail": args.trim_tail}))
     else:
-        body = given({"text": args.text, "instruction": args.instruction, "preset": args.preset,
+        body = given({"text": args.text, "voice": args.voice, "instruction": args.instruction, "preset": args.preset,
                       "cfg_scale": args.cfg, "like": args.like,
                       "language": args.lang, "speed": args.speed,
                       "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
@@ -252,10 +267,13 @@ def main() -> int:
             if res.get("reverb", "none") != "none":
                 shape += f"  reverb {res['reverb']}"
             print(f"take {res['id']}  seed {res.get('seed')}  preset {res.get('preset')}{shape}")
-            if res.get("instruction"):
+            if res.get("voice") and res.get("language") == "en":
+                print(f"voice: {res['voice']}")
+            elif res.get("instruction"):
                 print(f"voice: {res['instruction']}")
             elif res.get("like"):
-                print(f"voice: {'default voice, ' if res.get('default_voice') else ''}cloned from take {res['like']}")
+                who = f"{res.get('voice') or 'default voice'}, " if res.get("default_voice") else ""
+                print(f"voice: {who}cloned from take {res['like']}")
         keys = ("duration_s", "fx_s") if args.fx else ("duration_s", "gen_s", "fx_s")
         timing = [f"{k} {res[k]}s" for k in keys if k in res]
         print("  ".join(timing) + ("  (effects only, no regeneration)" if args.fx else ""))
