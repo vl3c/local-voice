@@ -167,3 +167,26 @@ def test_stretch_runs_first_wherever_it_is_written():
     a, b = voicefx.apply(x, sr, late), voicefx.apply(x, sr, early)
     assert len(a) == len(b) and np.allclose(a, b, atol=1e-4)
 
+
+def test_blend_mixes_the_aligned_voice():
+    x, sr = bursts()
+    p = voicefx.load_preset("reaper-drone")
+    machine, voice = voicefx.apply_layers(x, sr, p)
+    half = voicefx.apply(x, sr, p, blend=0.5)
+    assert abs(fx.loudness(half) - fx.TARGET_LUFS) < 0.5
+    def corr(a, b):  # over the common length: each trims its own silent tail
+        n = min(len(a), len(b))
+        return float(np.corrcoef(a[:n], b[:n])[0, 1])
+    assert corr(half, voice) > corr(machine, voice) + 0.2   # the human is in there
+    assert corr(voicefx.apply(x, sr, p, blend=1.0), voice) > 0.95   # all human = the voice stem
+
+
+def test_double_delays_the_machine_inside_a_blend():
+    x, sr = bursts()
+    p = voicefx.load_preset("reaper-drone")
+    plain = voicefx.apply(x, sr, p, blend=0.5)
+    doubled = voicefx.apply(x, sr, p, blend=0.5, double_ms=25)
+    assert len(doubled) > len(plain)
+    assert not np.allclose(plain[: len(plain) // 2], doubled[: len(plain) // 2], atol=1e-3)
+    with pytest.raises(ValueError):
+        voicefx.apply(x, sr, p, blend=1.5)

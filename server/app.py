@@ -494,20 +494,25 @@ def load_take(tid: str) -> dict:
 Reverb = Literal["none", "room", "hall", "cathedral"]
 
 
-def _fx_name(preset: str, pitch: float, tempo: float, reverb: str) -> str:
+def _fx_name(preset: str, pitch: float, tempo: float, reverb: str, blend: float = 0.0,
+             double_ms: float = 0.0) -> str:
     name = f"fx-{preset}"
     if pitch:
         name += f"_pitch{pitch:+g}"
     if tempo != 1.0:
         name += f"_tempo{tempo:g}"
+    if blend:
+        name += f"_blend{blend:g}"
+        if double_ms:
+            name += f"_double{double_ms:g}"
     if reverb != "none":
         name += f"_{reverb}"
     return name
 
 
 def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0.0, tempo: float = 1.0,
-           reverb: str = "none") -> dict:
-    """Apply a preset (plus pitch, tempo, reverb) to a take's dry voice; optionally transcribe and draw it."""
+           reverb: str = "none", blend: float = 0.0, double_ms: float = 0.0) -> dict:
+    """Apply a preset (plus pitch, tempo, blend, reverb) to a take's dry voice; optionally transcribe and draw it."""
     try:
         preset = voicefx.load_preset(preset_name)
     except FileNotFoundError as exc:
@@ -515,10 +520,13 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
 
     dry, sr = sf.read(take_paths(tid)["dry"], dtype="float32")
     t0 = time.time()
-    wet, voice = voicefx.apply_layers(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb)
+    if not blend:
+        double_ms = 0.0  # doubling is part of a blend: alone it would only delay the machine
+    wet, voice = voicefx.apply_layers(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb,
+                                      blend=blend, double_ms=double_ms)
     fx_s = time.time() - t0
     # "fx-" keeps every preset, including one called "dry", off the take's own files.
-    wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb)}.wav"
+    wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb, blend, double_ms)}.wav"
     sf.write(wet_path, wet, voicefx.SR, subtype="PCM_16")
     # The human voice under the effects: same timing (sample for sample), pitch, reverb,
     # length and loudness as the processed take, for blending in an edit.
@@ -530,6 +538,7 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
              bitrate_mode="CONSTANT", compression_level=0.3)
 
     res = {"id": tid, "preset": preset_name, "pitch": pitch, "tempo": tempo, "reverb": reverb,
+           "blend": blend, "double_ms": double_ms,
            "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
                      "voice": voice_path.name},
            "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2)}
@@ -729,7 +738,7 @@ def _voice_candidate(engine, seed: int, best: tuple[str, float] | None) -> tuple
 # saved from the page, live in config.local.json (gitignored) and override them.
 REPO_DEFAULTS = {"language": "en", "preset": DEFAULT_PRESET, "seed": DEFAULT_SEED, "cfg_scale": DEFAULT_CFG,
                  "speed": OMNI_DEFAULT_SPEED, "pitch": 0.0, "tempo": 1.0, "reverb": DEFAULT_REVERB,
-                 "check": True, "instruction": None}
+                 "blend": 0.0, "double_ms": 0.0, "check": True, "instruction": None}
 
 
 class Settings(BaseModel):
@@ -743,6 +752,8 @@ class Settings(BaseModel):
     pitch: float | None = Field(None, ge=-12, le=12)
     tempo: float | None = Field(None, ge=0.5, le=1.5)
     reverb: Reverb | None = None
+    blend: float | None = Field(None, ge=0, le=1)
+    double_ms: float | None = Field(None, ge=0, le=voicefx.MAX_DOUBLE_MS)
     check: bool | None = None
     instruction: str | None = Field(None, max_length=2000)  # English voice description; null = the preset's
 
@@ -797,6 +808,8 @@ class SpeakReq(BaseModel):
     pitch: float = Field(0.0, ge=-12, le=12)  # semitones, applied with the effects
     tempo: float = Field(1.0, ge=0.5, le=1.5)  # time-stretch, applied with the effects
     reverb: Reverb = DEFAULT_REVERB  # none / room / hall / cathedral, applied last
+    blend: float = Field(0.0, ge=0, le=1)  # share of the human voice mixed under the machine
+    double_ms: float = Field(0.0, ge=0, le=voicefx.MAX_DOUBLE_MS)  # with blend: the machine trails by this much
     like: str | None = None  # take id whose dry voice to keep (voice direction / cloning)
     check: bool = True
 
@@ -807,6 +820,8 @@ class FxReq(BaseModel):
     pitch: float = Field(0.0, ge=-12, le=12)
     tempo: float = Field(1.0, ge=0.5, le=1.5)
     reverb: Reverb = DEFAULT_REVERB
+    blend: float = Field(0.0, ge=0, le=1)
+    double_ms: float = Field(0.0, ge=0, le=voicefx.MAX_DOUBLE_MS)
     check: bool = True
 
 
@@ -831,7 +846,8 @@ def speak(req: SpeakReq):
     # Anything the request didn't set comes from the saved settings (or the repo's).
     # The language stays the request's own: saved settings never switch an agent's language.
     saved = local_settings()  # read once: a save mid-request can't mix old and new
-    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "check"), saved)
+    opt = _resolve(req, ("preset", "seed", "cfg_scale", "speed", "pitch", "tempo", "reverb", "blend", "double_ms",
+                         "check"), saved)
     try:
         preset = voicefx.load_preset(opt["preset"])
     except FileNotFoundError as exc:
@@ -901,7 +917,8 @@ def speak(req: SpeakReq):
             meta.setdefault("warnings", []).append(f"hit the model's {MAX_TAKE_S:.0f} s ceiling: the end of the text is probably "
                                 "missing. Split it into shorter takes (use --like to keep the voice).")
         take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
+        res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
+                     opt["blend"], opt["double_ms"])
     heard = f", {res['match']['wet']:.0%} of words heard" if "match" in res else ""
     print(f"[local-voice] {time.strftime('%H:%M:%S')} {req.language} take {tid}: {res['duration_s']}s of audio "
           f"in {gen_s:.1f}s, {opt['preset']}{heard}{' - WARNING' if meta.get('warnings') else ''}", flush=True)
@@ -965,9 +982,10 @@ def reset_settings():
 @app.post("/api/fx")
 def refx(req: FxReq):
     meta = load_take(req.id)
-    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "check"))
+    opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "blend", "double_ms", "check"))
     with _lock:
-        res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"])
+        res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
+                     opt["blend"], opt["double_ms"])
     print(f"[local-voice] {time.strftime('%H:%M:%S')} effects on take {req.id}: {opt['preset']}", flush=True)
     return {**meta, **res}
 

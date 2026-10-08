@@ -67,7 +67,9 @@ are two stages:
    sound. Re-running them on an existing take takes a second or two.
 4. **The voice stem.** Every render also writes `..._voice.wav`: the human voice the machine was
    driven by, sample-aligned with the processed take, with the same tempo, pitch, reverb, length
-   and loudness. Lay it under the processed track to mix machine and human. (The vocoder filters
+   and loudness. Lay it under the processed track to mix machine and human, or let the tool do it:
+   `blend` (0-1, the human's share, equal-power and loudness-matched) and optionally `double_ms`
+   (the machine trails the voice by 10-30 ms for a thicker, doubled texture). (The vocoder filters
    forwards and backwards so the machine speaks exactly in time with the voice; one-pass filters
    made it 10-90 ms late depending on pitch, which sounded doubled when blended.)
 5. **Loudness.** Every take ends normalised to **-16 LUFS** (ITU-R BS.1770 integrated loudness,
@@ -207,6 +209,8 @@ python scripts\say.py --presets
 | `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Slower than that: `--tempo`. |
 | `--pitch N` | Semitones, -12..12, on the finished sound (e.g. -4 for lower and bigger). |
 | `--tempo X` | Time-stretch, 0.5-1.5 (0.85 = slower, same pitch). |
+| `--blend X` | Mix the human voice under the machine, 0-1: 0 all machine, 0.5 half and half (equal loudness), 1 all human. Sample-aligned. |
+| `--double MS` | With `--blend`: the machine trails the voice by MS ms (0-60). 10-30 thickens the two into one doubled voice (it can read as extra reverb); 0, the default, keeps them exactly together. |
 | `--reverb KIND` | `none`, `room` (light; default), `hall` (medium), `cathedral` (heavy). |
 | `--like TAKE` | Keep an earlier take's voice for a new line, in either language, so a scene sounds like one speaker. |
 | `--default-voice [TAKE]` | Show the default voice, set it to TAKE, or `previous` to undo the last change. |
@@ -240,8 +244,8 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice, spectrogram), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
-| `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "reverb"?, "check"?}` | the take re-processed |
+| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice, spectrogram), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
+| `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names, descriptions, suggested voice descriptions |
 | `GET /api/health` | | which models are loaded, VRAM |
 | `GET` / `POST /api/default-voice` | `{"id"}` to set | the default voice: source take id, text, median pitch, `previous` |

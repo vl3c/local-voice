@@ -353,14 +353,15 @@ def load_preset(name: str) -> dict:
 
 
 def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
-          reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5) -> np.ndarray:
+          reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5,
+          blend: float = 0.0, double_ms: float = 0.0) -> np.ndarray:
     """Run a preset over mono audio at any rate; returns 48 kHz mono float32 (see apply_layers)."""
-    return apply_layers(audio, sr, preset, pitch, tempo, reverb, target_lufs, tail_s)[0]
+    return apply_layers(audio, sr, preset, pitch, tempo, reverb, target_lufs, tail_s, blend, double_ms)[0]
 
 
 def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
-                 reverb: str = "none", target_lufs: float = -16.0,
-                 tail_s: float = 2.5) -> tuple[np.ndarray, np.ndarray]:
+                 reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5,
+                 blend: float = 0.0, double_ms: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """Run a preset over mono audio at any rate: (processed, voice), both 48 kHz mono float32.
 
     Timing is settled first: every `stretch` op in the preset's `pre` chain, and
@@ -368,6 +369,10 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
     voice before anything else runs. That stretched voice is `voice`: the human
     layer, sample-aligned with the processed take, given the same pitch and reverb
     and the same length, for blending under (or over) the machine.
+
+    blend mixes that voice into the result: 0 = all machine, 0.5 = half and half,
+    1 = all voice (see blend_layers). double_ms > 0 lets the machine trail the voice
+    by that many ms, a doubling that thickens the blend.
 
     pitch (semitones) applies to the finished sound, after the preset: it moves
     everything down together, the machine's tone and the size of its "throat"
@@ -379,6 +384,8 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
     """
     if reverb not in REVERBS:
         raise ValueError(f"unknown reverb {reverb!r}; choose from {', '.join(REVERBS)}")
+    if not 0.0 <= blend <= 1.0 or not 0.0 <= double_ms <= MAX_DOUBLE_MS:
+        raise ValueError(f"blend must be 0-1 and double_ms 0-{MAX_DOUBLE_MS:g}")
     voice = timed_voice(audio, sr, preset, tempo, tail_s)
     if not len(voice) or _peak(voice) < SILENCE:
         return np.zeros(len(voice), dtype=np.float32), np.zeros(len(voice), dtype=np.float32)
@@ -395,6 +402,9 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
 
     y = np.nan_to_num(chain(mix, preset.get("post", [])))
     voice = fit(voice, len(y))
+    if blend:
+        y = blend_layers(y, voice, blend, double_ms)
+        voice = fit(voice, len(y))
     if pitch:
         y = op_pitch(y, semitones=pitch, preserve_formants=False)
         voice = op_pitch(voice, semitones=pitch, preserve_formants=False)
@@ -427,6 +437,30 @@ def stretch_rate(preset: dict, tempo: float = 1.0) -> float:
     A time t in the render is t * stretch_rate in the dry take."""
     pre = [op for op in preset.get("pre", []) if not op.get("off")]
     return float(np.prod([op.get("rate", 1.0) for op in pre if op["op"] == "stretch"])) * tempo
+
+
+MAX_DOUBLE_MS = 60.0
+
+
+def blend_layers(machine: np.ndarray, voice: np.ndarray, blend: float, double_ms: float = 0.0) -> np.ndarray:
+    """Equal-power mix of the machine and the voice under it, loudness-matched first.
+
+    blend is the voice's share: 0 = all machine, 1 = all voice; 0.5 gives both
+    the same loudness. The two are effectively uncorrelated (the machine's tone
+    is synthetic), so cos/sin gains keep the total loudness steady across the range.
+    double_ms delays the machine by that much: 10-30 ms reads as one thicker,
+    doubled voice rather than an echo.
+    """
+    def matched(x):
+        level = loudness(x)
+        return x * db(-23.0 - level) if np.isfinite(level) else x
+
+    m, v = matched(machine), matched(voice)
+    d = int(SR * double_ms / 1000)
+    if d:
+        m, v = np.pad(m, (d, 0)), np.pad(v, (0, d))
+    th = float(blend) * np.pi / 2
+    return (np.cos(th) * m + np.sin(th) * v).astype(np.float32)
 
 
 TARGET_LUFS = -16.0   # speech on phones, podcasts, messengers

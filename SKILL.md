@@ -139,6 +139,8 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--speed X` | Romanian only: the model's speaking rate, 0.75-1.3 (default 0.9). Below 0.75 it repeats words, so the server refuses it: use `--tempo` for slower. |
 | `--pitch N` | Semitones, -12..12, on the finished sound: negative is lower and bigger (tone and "throat" move together). -3 to -5 is a good start. |
 | `--tempo X` | Time-stretch, 0.5-1.5, same pitch: below 1 is slower. |
+| `--blend X` | Mix the human voice under the machine, 0-1 (0 all machine, 0.5 half and half, 1 all human), sample-aligned: "partly machine, partly human". Works with `--fx`. |
+| `--double MS` | With `--blend`: the machine trails the voice by MS ms, 0-60. 10-30 gives a thicker, doubled texture (it can read as extra reverb); 0, the default, keeps them exactly together. |
 | `--reverb KIND` | `none` (dry: for a take that will get its own room in a mix), `room` (default), `hall`, `cathedral`. |
 | `--default-voice [TAKE]` | Show the default voice, set it to TAKE (only when the user asks), or `previous` to undo. |
 | `--settings` | Show the defaults in effect: the user may have saved their own (`config.local.json`), which every request without that option uses. Check it before assuming the built-in defaults. |

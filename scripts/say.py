@@ -14,6 +14,7 @@ The server must be running (start.cmd). Everything stays on 127.0.0.1.
     python scripts/say.py --default-voice previous                      # undo the last change
     python scripts/say.py --settings                                    # the defaults in effect
     python scripts/say.py --fx 20260101-120000-ab12 --preset harbinger --check  # re-run effects only
+    python scripts/say.py --fx 20260101-120000-ab12 --blend 0.5 --double 20     # half machine, half human
     python scripts/say.py --presets
 
 --check transcribes the dry and processed audio with Whisper and draws a
@@ -139,6 +140,10 @@ def main() -> int:
                     "works with --fx too")
     ap.add_argument("--tempo", type=float, help="time-stretch, 0.5-1.5, applied with the effects "
                     "(0.85 = slower, same pitch); works with --fx too")
+    ap.add_argument("--blend", type=float, help="0-1: mix the human voice under the machine (0 = all machine, "
+                    "0.5 = half and half, 1 = all voice), sample-aligned; works with --fx too")
+    ap.add_argument("--double", type=float, metavar="MS", help="with --blend: let the machine trail the voice by "
+                    "MS ms (0-60; 10-30 thickens it into one doubled voice); works with --fx too")
     ap.add_argument("--seed", help="a number to reproduce a take; 'random' for a new voice "
                     "(default: 74525861)")
     ap.add_argument("--cfg", type=float, help="English only: instruction strength (default 6; Breeze recommends 4)")
@@ -205,13 +210,14 @@ def main() -> int:
         return 0
     if args.fx:
         res = call("/api/fx", given({"id": args.fx, "preset": args.preset, "check": args.check,
-                                     "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb}))
+                                     "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
+                                     "blend": args.blend, "double_ms": args.double}))
     else:
         body = given({"text": args.text, "instruction": args.instruction, "preset": args.preset,
                       "cfg_scale": args.cfg, "like": args.like,
                       "language": args.lang, "speed": args.speed,
                       "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
-                      "check": args.check})
+                      "blend": args.blend, "double_ms": args.double, "check": args.check})
         if args.seed is not None:  # omitted: the server's default seed
             body["seed"] = None if args.seed.lower() == "random" else int(args.seed)
         res = call("/api/speak", body)
@@ -222,7 +228,8 @@ def main() -> int:
     else:
         if "id" in res:
             shape = "".join(f"  {k} {res[k]:+g}" if k == "pitch" else f"  {k} {res[k]:g}"
-                            for k, neutral in (("pitch", 0), ("tempo", 1)) if res.get(k, neutral) != neutral)
+                            for k, neutral in (("pitch", 0), ("tempo", 1), ("blend", 0), ("double_ms", 0))
+                            if res.get(k, neutral) != neutral)
             if res.get("reverb", "none") != "none":
                 shape += f"  reverb {res['reverb']}"
             print(f"take {res['id']}  seed {res.get('seed')}  preset {res.get('preset')}{shape}")
