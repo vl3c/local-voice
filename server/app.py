@@ -557,18 +557,20 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
     fx_s = time.time() - t0
     # "fx-" keeps every preset, including one called "dry", off the take's own files.
     wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb, blend, double_ms, bass_db)}.wav"
-    sf.write(wet_path, wet, voicefx.SR, subtype="PCM_16")
+    frames = wet.T if wet.ndim == 2 else wet  # a preset with a stereo echo renders (2, samples)
+    sf.write(wet_path, frames, voicefx.SR, subtype="PCM_16")
     # The human voice under the effects: same timing (sample for sample), pitch, reverb,
     # length and loudness as the processed take, for blending in an edit.
     voice_path = wet_path.with_name(wet_path.stem + "_voice.wav")
     sf.write(voice_path, voice, voicefx.SR, subtype="PCM_16")
     # An MP3 too: WhatsApp and most messengers won't take WAV as audio.
     mp3_path = wet_path.with_suffix(".mp3")
-    sf.write(mp3_path, wet, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
+    sf.write(mp3_path, frames, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
              bitrate_mode="CONSTANT", compression_level=0.3)
 
     boost = voicefx.articulation_boost(voicefx.fx.to_sr(dry, sr)) if preset.get("articulation", True) else 0.0
-    speech = voicefx.speech_lufs(wet)
+    wet_mono = voicefx.mono(wet)
+    speech = voicefx.speech_lufs(wet_mono)
     if speech < voicefx.SPEECH_BURIED_LUFS:
         warnings.append(f"the words are buried under the bass (speech band {speech:.1f} LUFS; clear takes measure "
                         f"about -21 to -23): this base voice is too boomy for EQ to fix. Try another seed.")
@@ -579,12 +581,12 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
            "blend": blend, "double_ms": double_ms, "bass_db": bass_db, "trim_end_s": meta.get("trim_end_s"),
            "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
                      "voice": voice_path.name},
-           "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1),
+           "channels": wet.ndim, "duration_s": round(wet.shape[-1] / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1),
            "articulation_boost_db": boost}
     if check:
         try:
             timeline = voicefx.timed_voice(dry, sr, preset, tempo)
-            c = _check(tid, meta, dry, sr, wet, wet_path, timeline)
+            c = _check(tid, meta, dry, sr, wet_mono, wet_path, timeline)
             res["files"].update(c.pop("files"))
             warnings += c.pop("warnings")
             res.update(c)

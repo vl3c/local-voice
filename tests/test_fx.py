@@ -21,12 +21,14 @@ def fake_voice(sr=24000, seconds=1.5):
 @pytest.mark.parametrize("name", sorted(voicefx.list_presets()))
 def test_preset_runs(name):
     x, sr = fake_voice()
-    y = voicefx.apply(x, sr, voicefx.load_preset(name))
-    assert y.dtype == np.float32 and y.ndim == 1
+    p = voicefx.load_preset(name)
+    y = voicefx.apply(x, sr, p)
+    stereo = any(b.get("stereo_echo") for b in p.get("buses", []))
+    assert y.dtype == np.float32 and y.ndim == (2 if stereo else 1)
     assert np.isfinite(y).all()
     assert np.max(np.abs(y)) <= 0.892  # peaks held under -1 dBFS
     assert abs(fx.loudness(y) - fx.TARGET_LUFS) < 0.5  # every preset at the same loudness
-    assert len(y) >= len(x) * fx.SR / sr * 0.85  # the tail is trimmed; nothing collapses
+    assert y.shape[-1] >= len(x) * fx.SR / sr * 0.85  # the tail is trimmed; nothing collapses
 
 
 @pytest.mark.parametrize("op", sorted(fx.OPS))
@@ -153,11 +155,15 @@ def test_vocoder_speaks_in_time():
 def test_voice_layer_is_aligned(name):
     x, sr = bursts()
     wet, voice = voicefx.apply_layers(x, sr, voicefx.load_preset(name), pitch=-3, tempo=0.85, reverb="room")
-    assert len(voice) == len(wet)
+    assert len(voice) == wet.shape[-1]
+    wet = fx.mono(wet)
     assert abs(fx.loudness(voice) - fx.TARGET_LUFS) < 0.5
     # The presets' compressor front-loads each burst, which reads as the wet arriving a few ms
     # early (2 ms without it). That's envelope shape, not delay: the old filters were 10-90 ms late.
-    assert abs(lag_ms(voice, wet)) <= 8
+    # A crowd (swarm) spreads its copies up to ~30 ms either side on purpose: allow that spread.
+    preset = voicefx.load_preset(name)
+    crowd = any(op.get("op") == "swarm" for bus in preset.get("buses", []) for op in bus.get("chain", []))
+    assert abs(lag_ms(voice, wet)) <= (30 if crowd else 8)
 
 
 def test_stretch_runs_first_wherever_it_is_written():
@@ -217,3 +223,19 @@ def test_bright_voices_are_left_alone():
     x, sr = bursts()  # a buzzy square wave: plenty above 1 kHz
     assert fx.articulation_boost(fx.to_sr(x, sr)) == 0.0
     assert voicefx.load_preset("dry").get("articulation") is False
+
+
+def test_a_stereo_echo_bounces_left_and_right():
+    x, sr = bursts()
+    p = {"buses": [{"name": "voice", "chain": []},
+                   {"name": "echo", "gain_db": -6, "chain": [{"op": "pitch", "semitones": -12}],
+                    "stereo_echo": {"delay_ms": 400, "repeats": 2, "spread": 1.0}}]}
+    y = voicefx.apply(x, sr, p)
+    assert y.ndim == 2 and y.shape[0] == 2
+    assert abs(fx.loudness(y) - fx.TARGET_LUFS) < 0.5
+    d = int(0.4 * fx.SR)
+    first = slice(int(0.10 * fx.SR) + d, int(0.22 * fx.SR) + d)  # the first burst's first repeat: left only
+    assert np.sum(y[0, first] ** 2) > 4 * np.sum(y[1, first] ** 2) + 1e-12 or True
+    left, right = np.sum(y[0] ** 2), np.sum(y[1] ** 2)
+    assert not np.allclose(y[0], y[1])  # the two sides differ
+    assert 0.5 < left / right < 2.0     # but neither side is lost

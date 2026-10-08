@@ -1,0 +1,118 @@
+{
+  "description": "Many as one: the voice multiplied into a crowd (detuned copies spread up to ~30 ms either side, two an octave below, one above), with an insect buzz from a slow ring modulator. 'We are legion.' Epic on deep voices; on a high one, --blend 0.3 brings the person back.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 80
+    },
+    {
+      "op": "compress",
+      "threshold_db": -28,
+      "ratio": 3,
+      "attack_ms": 5,
+      "release_ms": 120,
+      "makeup_db": 4
+    }
+  ],
+  "buses": [
+    {
+      "name": "swarm",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "swarm",
+          "voices": [
+            {
+              "semitones": 0.0,
+              "delay_ms": 0,
+              "gain_db": 0
+            },
+            {
+              "semitones": 0.18,
+              "delay_ms": -14,
+              "gain_db": -1
+            },
+            {
+              "semitones": -0.22,
+              "delay_ms": 11,
+              "gain_db": -1
+            },
+            {
+              "semitones": 0.35,
+              "delay_ms": 22,
+              "gain_db": -2
+            },
+            {
+              "semitones": -0.4,
+              "delay_ms": -25,
+              "gain_db": -2
+            },
+            {
+              "semitones": 0.1,
+              "delay_ms": 31,
+              "gain_db": -3
+            },
+            {
+              "semitones": -12,
+              "delay_ms": -6,
+              "gain_db": -3
+            },
+            {
+              "semitones": -11.8,
+              "delay_ms": 15,
+              "gain_db": -5
+            },
+            {
+              "semitones": 12,
+              "delay_ms": 7,
+              "gain_db": -8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "buzz",
+      "gain_db": -5,
+      "chain": [
+        {
+          "op": "highpass",
+          "hz": 300
+        },
+        {
+          "op": "ringmod",
+          "hz": 38,
+          "mix": 1.0
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "op": "comb",
+      "delay_ms": 2.2,
+      "feedback": 0.4,
+      "mix": 0.15
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "lowshelf",
+          "hz": 150,
+          "gain_db": -3
+        },
+        {
+          "type": "peak",
+          "hz": 1500,
+          "gain_db": 2,
+          "q": 0.8
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}

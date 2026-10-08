@@ -1,0 +1,79 @@
+{
+  "description": "A ship's AI or a calm assistant: the real voice, clear and close, with a short metallic flanger, a high digital shimmer and a little bit-crush: processed, never mechanical. Works with any voice.",
+  "pre": [
+    {
+      "op": "highpass",
+      "hz": 90
+    },
+    {
+      "op": "compress",
+      "threshold_db": -26,
+      "ratio": 3,
+      "attack_ms": 5,
+      "release_ms": 100,
+      "makeup_db": 4
+    }
+  ],
+  "buses": [
+    {
+      "name": "voice",
+      "gain_db": 0,
+      "chain": [
+        {
+          "op": "chorus",
+          "rate_hz": 0.3,
+          "depth": 0.2,
+          "delay_ms": 1.2,
+          "feedback": 0.45,
+          "mix": 0.3
+        }
+      ]
+    },
+    {
+      "name": "shimmer",
+      "gain_db": -16,
+      "chain": [
+        {
+          "op": "highpass",
+          "hz": 2000
+        },
+        {
+          "op": "ringmod",
+          "hz": 1800,
+          "mix": 1.0
+        }
+      ]
+    }
+  ],
+  "post": [
+    {
+      "op": "crush",
+      "bits": 12,
+      "downsample": 1,
+      "mix": 0.2
+    },
+    {
+      "op": "eq",
+      "bands": [
+        {
+          "type": "highpass",
+          "hz": 120
+        },
+        {
+          "type": "peak",
+          "hz": 3000,
+          "gain_db": 3,
+          "q": 1.0
+        },
+        {
+          "type": "lowpass",
+          "hz": 12000
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "threshold_db": -1
+    }
+  ]
+}
