@@ -833,9 +833,13 @@ def default_voice_ref(voice: str = DEFAULT_VOICE) -> tuple[Path, str, str]:
 
     Call with _lock held. The default voice (ancient-male) is found by a search: Breeze
     makes a few candidates and the deepest (under 75 Hz, ~65 Hz typical) becomes it.
-    Any other built-in voice is one take from its own description and seed.
+    Any other built-in voice is one take from its own description and seed, or, if the
+    catalog gives it "romanian" attributes, one native Romanian take designed from them:
+    a clone of an English take carries its English accent, which shows on some voices.
     """
     info = default_voice_info(voice)
+    if not info and voice != DEFAULT_VOICE and catalog_voice(voice).get("romanian"):
+        info = set_default_voice(_romanian_voice_take(voice, catalog_voice(voice)["romanian"]), voice)
     if not info:
         engine = tts()
         if voice != DEFAULT_VOICE:
@@ -860,6 +864,29 @@ def default_voice_ref(voice: str = DEFAULT_VOICE) -> tuple[Path, str, str]:
             raise RuntimeError("no default-voice candidate had a measurable pitch")
         info = set_default_voice(best[0])
     return _slot(_slots(voice)[0])[0], info["text"], info["id"]
+
+
+VOICE_TEXT_RO = "Am așteptat foarte mult timp. Acum, în sfârșit, ne poți auzi."  # the line its seed was picked on
+
+
+def _romanian_voice_take(voice: str, spec: dict) -> str:
+    """One OmniVoice take of VOICE_TEXT_RO designed from spec["attributes"] and spec["seed"]:
+    a native Romanian voice for `voice`, kept as what its Romanian lines clone."""
+    tid = time.strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+    try:
+        # The way a take is made (sentence by sentence, verified), so the seed gives the voice it was picked by.
+        omni_take(VOICE_TEXT_RO, "ro", spec["attributes"], int(spec["seed"]), OMNI_DEFAULT_SPEED, take_paths(tid)["dry"],
+                  None, None)
+        meta = {"id": tid, "text": VOICE_TEXT_RO, "language": "ro", "instruction": spec["attributes"],
+                "seed": spec["seed"], "model": "omnivoice", "made_for": f"{voice} (Romanian)", "like": None}
+        take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        for p in take_paths(tid).values():
+            p.unlink(missing_ok=True)
+        raise
+    print(f"[local-voice] {voice}: native Romanian voice {tid} from \"{spec['attributes']}\" (seed {spec['seed']})",
+          flush=True)
+    return tid
 
 
 def _voice_candidate(engine, seed: int, best: tuple[str, float] | None, instruction: str = VOICE_INSTRUCTION,

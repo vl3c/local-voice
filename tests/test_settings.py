@@ -265,3 +265,23 @@ def test_each_voice_keeps_its_own_romanian_clone(app):
 def test_presets_no_longer_carry_a_voice():
     import voicefx
     assert all("instruction" not in p for p in voicefx.list_presets().values())
+
+
+def test_a_voice_with_romanian_attributes_gets_a_native_romanian_take(app, monkeypatch):
+    made = []
+
+    def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
+        made.append({"language": language, "instruct": instruct, "seed": seed, "ref": ref_audio})
+        sr = 24000
+        t = np.arange(sr) / sr
+        sf.write(out, (0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32), sr)
+        return {"spoken_text": text, "sentences": [], "duration_s": 1.0}
+
+    monkeypatch.setattr(app, "omni_take", fake_omni_take)
+    monkeypatch.setattr(app, "tts", lambda: pytest.fail("a native Romanian voice needs no English take"))
+    spec = app.voice_catalog()["young-woman"]["romanian"]
+    wav, text, tid = app.default_voice_ref("young-woman")
+    assert made == [{"language": "ro", "instruct": spec["attributes"], "seed": spec["seed"], "ref": None}]
+    assert wav.is_file() and text == app.VOICE_TEXT_RO
+    assert app.default_voice_info("young-woman")["id"] == tid
+    assert app.default_voice_ref("young-woman")[2] == tid  # made once, then reused
