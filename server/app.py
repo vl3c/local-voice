@@ -109,6 +109,7 @@ def _own_origins(request) -> set[str]:
 _lock = threading.Lock()  # one generation at a time: the models are not re-entrant
 _tts = None
 _asr = None
+_last_used = time.monotonic()  # the last take or effects run: standby counts from here
 _settings = argparse.Namespace()
 FAST_STAGES = ("text_encoder", "backbone_prefill", "backbone_decode", "depth_decoder", "codec")
 
@@ -949,8 +950,60 @@ def health():
     free, total = torch.cuda.mem_get_info() if torch.cuda.is_available() else (0, 0)
     return {"ok": True, "tts_loaded": _tts is not None, "whisper_loaded": _asr is not None,
             "omnivoice_loaded": _omni is not None and _omni.proc.poll() is None,
+            "standby": not _loaded(), "idle_unload_min": getattr(_settings, "idle_unload", 0),
+            "idle_s": round(time.monotonic() - _last_used),
             "server_reserved_gb": round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0,
             "vram_used_gb": round((total - free) / 2**30, 2), "vram_total_gb": round(total / 2**30, 2)}
+
+
+@app.post("/api/unload")
+def unload():
+    """Free the GPU without stopping the server: every model is dropped; the next
+    request loads what it needs again (~1 min for English, with the fast paths)."""
+    with _lock:
+        return unload_models("on request")
+
+
+def _loaded() -> list[str]:
+    return [name for name, on in (("tts", _tts is not None), ("whisper", _asr is not None),
+                                  ("omnivoice", _omni is not None and _omni.proc.poll() is None)) if on]
+
+
+def unload_models(why: str) -> dict:
+    """Drop every model and hand their VRAM back. Call with _lock held."""
+    global _tts, _asr, _omni
+    import gc
+    import torch
+    gone = _loaded()
+    if _omni is not None:
+        _omni.close()
+    _tts = _asr = _omni = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    reserved = round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0
+    if gone:
+        print(f"[local-voice] {time.strftime('%H:%M:%S')} standby ({why}): unloaded {', '.join(gone)}; "
+              f"the next request loads them again (~1 min)", flush=True)
+    return {"unloaded": gone, "server_reserved_gb": reserved}
+
+
+def _touch() -> None:
+    global _last_used
+    _last_used = time.monotonic()
+
+
+def _standby_watch(minutes: float) -> None:
+    """Unload the models once nothing has used them for `minutes` (checked every 30 s).
+    A take in progress holds _lock, so standby never interrupts one."""
+    while True:
+        time.sleep(30)
+        if _loaded() and time.monotonic() - _last_used >= minutes * 60 and _lock.acquire(blocking=False):
+            try:
+                if time.monotonic() - _last_used >= minutes * 60:  # nothing slipped in meanwhile
+                    unload_models(f"idle {minutes:g} min")
+            finally:
+                _lock.release()
 
 
 @app.get("/api/presets")
@@ -1037,6 +1090,7 @@ def speak(req: SpeakReq):
         take_paths(tid)["meta"].write_text(json.dumps(meta, indent=2), encoding="utf-8")
         res = render(tid, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
                      opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
+        _touch()
     heard = f", {res['match']['wet']:.0%} of words heard" if "match" in res else ""
     print(f"[local-voice] {time.strftime('%H:%M:%S')} {req.language} take {tid}: {res['duration_s']}s of audio "
           f"in {gen_s:.1f}s, {opt['preset']}{heard}{' - WARNING' if meta.get('warnings') else ''}", flush=True)
@@ -1104,6 +1158,7 @@ def refx(req: FxReq):
     with _lock:
         res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
                      opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
+        _touch()
     print(f"[local-voice] {time.strftime('%H:%M:%S')} effects on take {req.id}: {opt['preset']}", flush=True)
     return {**meta, **res}
 
@@ -1158,7 +1213,11 @@ def main() -> None:
     ap.add_argument("--fast", default="backbone_decode,depth_decoder,codec", help=f"comma-separated CUDA-graph stages to enable: {','.join(FAST_STAGES)}")
     ap.add_argument("--safe", action="store_true", help="eager attention, no fast paths: slow but simplest")
     ap.add_argument("--lazy", action="store_true", help="load the TTS model on the first request")
+    ap.add_argument("--idle-unload", type=float, default=15, metavar="MIN",
+                    help="standby: unload the models after this many idle minutes, freeing the GPU while the "
+                    "server keeps running (the next request reloads them, ~1 min); 0 = never (default 15)")
     args = ap.parse_args()
+    _settings.idle_unload = max(0.0, args.idle_unload)
     if args.safe:
         args.attn, args.fast = "eager", ""
     _settings.attn = args.attn
@@ -1183,6 +1242,9 @@ def main() -> None:
     atexit.register(lambda: PID_FILE.unlink(missing_ok=True))
     if not args.lazy:
         tts()
+    if _settings.idle_unload:
+        _touch()
+        threading.Thread(target=_standby_watch, args=(_settings.idle_unload,), daemon=True).start()
     # Loopback only, always: nothing here is meant to be reachable from the network.
     print(f"[local-voice] ready on http://127.0.0.1:{args.port}/  (stop: close this window, or stop.cmd)", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

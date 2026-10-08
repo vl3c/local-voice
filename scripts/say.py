@@ -162,6 +162,9 @@ def main() -> int:
     ap.add_argument("--default-voice", dest="default_voice", nargs="?", const="", metavar="TAKE",
                     help="show the default voice (what Romanian clones unless told otherwise), set it to TAKE, "
                     "or 'previous' to undo the last change")
+    ap.add_argument("--unload", action="store_true",
+                    help="free the GPU: the server drops its models but keeps running; the next request "
+                    "reloads them (~1 min). It also does this by itself after 15 idle minutes")
     ap.add_argument("--settings", action="store_true",
                     help="show the defaults in effect: built-in, or the user's saved ones (config.local.json)")
     ap.add_argument("--out", type=Path, help="copy results here (never overwrites)")
@@ -181,12 +184,17 @@ def main() -> int:
 
     if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
         ap.error("--seed takes a number or 'random'")
-    if not (args.text or args.fx or args.presets or args.default_voice is not None or args.settings):
-        ap.error("give the text to say, or --fx TAKE, --presets, --settings or --default-voice")
+    if not (args.text or args.fx or args.presets or args.default_voice is not None or args.settings or args.unload):
+        ap.error("give the text to say, or --fx TAKE, --presets, --settings, --default-voice or --unload")
     if not wait_for_server(args.wait):
         print(f"No server at {SERVER}. Start it with start.cmd (or start.cmd --no-browser).")
         return 1
 
+    if args.unload:
+        r = call("/api/unload", {})
+        print(f"unloaded {', '.join(r['unloaded']) or 'nothing (already in standby)'}; "
+              f"the server now holds {r['server_reserved_gb']} GB")
+        return 0
     if args.presets:
         for k, v in call("/api/presets").items():
             print(f"{k}\n  {v['description']}\n  voice: {v['instruction'] or '(none)'}\n")

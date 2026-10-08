@@ -154,6 +154,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--wait S` | Wait up to S seconds for the server. |
 | `--json` | Only the server's JSON (plus `paths`): parse this rather than the text output. |
 | `--play` | Play the processed take on the user's speakers when it's ready; returns when playback ends. Exit 1 if it couldn't play. |
+| `--unload` | Free the GPU now; the server stays up and reloads on the next request (it also does this after 15 idle minutes). |
 | `--no-save` | Delete what this call made from `output/` when done (after `--play` and/or `--out`): the whole new take, or with `--fx` only that preview's files (the take is kept). For speech that's only meant to be heard. |
 
 **Presets.** "The Reaper voice" means the default, `reaper-drone`; offer the others as variations.
@@ -247,8 +248,10 @@ lines with `--like`.
 ## 5. When you're done
 
 The server keeps the model in VRAM: that's what makes the next take fast, but it blocks the
-local-agent and local-image servers. **Leave it running and tell the user** it's up. Stop it when
-they're done or want one of those:
+local-agent and local-image servers. **Leave it running and tell the user** it's up: after 15
+idle minutes it unloads its models by itself (standby, ~0.2 GB) and reloads them on the next
+request (~20 s). To free the GPU right away without stopping it:
+`python ~/.claude/skills/local-voice/scripts/say.py --unload`. Stop it when they're done:
 
 ```bash
 cmd //c "$(cygpath -w ~/.claude/skills/local-voice/stop.cmd)"
