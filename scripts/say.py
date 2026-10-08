@@ -169,7 +169,7 @@ def main() -> int:
                     "or 'previous' to undo the last change")
     ap.add_argument("--unload", action="store_true",
                     help="free the GPU: the server drops its models but keeps running; the next request "
-                    "reloads them (~1 min). It also does this by itself after 15 idle minutes")
+                    "reloads them (~20 s, or ~1 min if the fast paths were never compiled). It also does this by itself after 15 idle minutes")
     ap.add_argument("--settings", action="store_true",
                     help="show the defaults in effect: built-in, or the user's saved ones (config.local.json)")
     ap.add_argument("--out", type=Path, help="copy results here (never overwrites)")

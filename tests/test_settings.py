@@ -285,3 +285,22 @@ def test_a_voice_with_romanian_attributes_gets_a_native_romanian_take(app, monke
     assert wav.is_file() and text == app.VOICE_TEXT_RO
     assert app.default_voice_info("young-woman")["id"] == tid
     assert app.default_voice_ref("young-woman")[2] == tid  # made once, then reused
+
+
+def test_a_saved_english_description_never_reaches_romanian(app, monkeypatch):
+    """Review finding: the saved description is English prose; OmniVoice would read it as attributes."""
+    ref = make_take(app, "20260101-120000-cccc")
+    calls = []
+
+    def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
+        calls.append({"instruct": instruct, "ref": ref_audio})
+        sr = 24000
+        sf.write(out, (0.3 * np.sin(2 * np.pi * 120 * np.arange(sr) / sr)).astype(np.float32), sr)
+        return {"spoken_text": text, "sentences": [], "duration_s": 1.0}
+
+    monkeypatch.setattr(app, "omni_take", fake_omni_take)
+    monkeypatch.setattr(app, "default_voice_ref", lambda voice: (app.take_paths(ref)["dry"], "We are the dark.", ref))
+    app.save_settings(app.Settings(instruction="A gravelly old pirate, loud and slurring."))
+    r = app.speak(app.SpeakReq(text="Bună ziua.", language="ro", check=False))
+    assert calls[-1]["instruct"] is None and calls[-1]["ref"] is not None  # cloned, not designed
+    assert r["default_voice"] is True

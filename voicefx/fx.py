@@ -468,7 +468,8 @@ def load_preset(name: str) -> dict:
 def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
           reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5,
           blend: float = 0.0, double_ms: float = 0.0, bass_db: float = 0.0) -> np.ndarray:
-    """Run a preset over mono audio at any rate; returns 48 kHz mono float32 (see apply_layers)."""
+    """Run a preset over mono audio at any rate; returns 48 kHz float32: mono, or (2, samples)
+    for a preset with a stereo echo (see apply_layers)."""
     return apply_layers(audio, sr, preset, pitch, tempo, reverb, target_lufs, tail_s, blend, double_ms, bass_db)[0]
 
 
@@ -476,7 +477,8 @@ def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, t
                  reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5,
                  blend: float = 0.0, double_ms: float = 0.0,
                  bass_db: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
-    """Run a preset over mono audio at any rate: (processed, voice), both 48 kHz mono float32.
+    """Run a preset over mono audio at any rate: (processed, voice), 48 kHz float32. The voice is
+    mono; the processed take is too, unless a bus has "stereo_echo": then it is (2, samples).
 
     Timing is settled first: every `stretch` op in the preset's `pre` chain, and
     tempo (1 = as generated, below 1 = slower), are one time-stretch of the clean
@@ -636,7 +638,10 @@ SPEECH_BURIED_LUFS = -27.0    # below this: the base voice itself is too boomy; 
 
 
 def speech_lufs(y: np.ndarray) -> float:
-    """Loudness (LUFS) of the 300 Hz-4 kHz band alone: how loud the words are in a take."""
+    """Loudness (LUFS) of the 300 Hz-4 kHz band alone: how loud the words are in a take.
+    -inf for silence, or a take too short to filter (a few ms)."""
+    if y.shape[-1] < 64:
+        return float("-inf")
     sos = signal.butter(4, [SPEECH_BAND[0] / (SR / 2), SPEECH_BAND[1] / (SR / 2)], "band", output="sos")
     return loudness(signal.sosfiltfilt(sos, y.astype(np.float64), axis=-1).astype(np.float32))
 

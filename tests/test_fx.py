@@ -239,3 +239,8 @@ def test_a_stereo_echo_bounces_left_and_right():
     left, right = np.sum(y[0] ** 2), np.sum(y[1] ** 2)
     assert not np.allclose(y[0], y[1])  # the two sides differ
     assert 0.5 < left / right < 2.0     # but neither side is lost
+
+
+def test_a_take_too_short_to_measure_has_no_speech_level():
+    assert fx.speech_lufs(np.zeros(10, dtype=np.float32)) == float("-inf")
+    assert fx.speech_lufs(np.zeros((2, 10), dtype=np.float32)) == float("-inf")

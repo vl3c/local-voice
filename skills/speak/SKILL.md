@@ -95,7 +95,7 @@ means `--tempo 0.85`. `--voices` and `--presets` list the rest.
 
 Leave the server running: it keeps the voice ready, so the next line takes seconds. It does hold
 the GPU (10-14 GB), which blocks the local-agent and local-image servers; after 15 idle minutes it
-lets go by itself (standby) and reloads in ~20 s on the next line. To free the GPU now without
+lets go by itself (standby) and reloads on the next line (~20 s; ~1 min if it was never warmed up). To free the GPU now without
 stopping it: `python ~/.claude/skills/local-voice/scripts/say.py --unload`. If the user is done
 with voice, offer to stop it:
 

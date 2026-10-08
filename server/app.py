@@ -538,13 +538,17 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
     if trim_tail is False and meta.pop("trim_end_s", None) is not None:
         _save_meta(tid, meta)
     if trim_tail and not meta.get("trim_end_s"):
-        timeline = voicefx.timed_voice(dry, sr, preset, tempo)
-        timing = word_timing(meta.get("spoken_text") or meta["text"], timeline, meta.get("language", "en"))
-        after = timing["stray"]["after"]
+        try:
+            timeline = voicefx.timed_voice(dry, sr, preset, tempo)
+            timing = word_timing(meta.get("spoken_text") or meta["text"], timeline, meta.get("language", "en"))
+            after = timing["stray"]["after"]
+        except Exception as exc:  # the take exists either way: render it uncut, and say why
+            after = None
+            warnings.append(f"--trim-tail failed ({type(exc).__name__}: {exc}); rendered without the cut")
         if after:
             meta["trim_end_s"] = round(after["cut"] * voicefx.stretch_rate(preset, tempo), 3)
             _save_meta(tid, meta)
-        else:
+        elif not any(w.startswith("--trim-tail failed") for w in warnings):
             warnings.append("--trim-tail: nothing after the last word to trim")
     if meta.get("trim_end_s"):
         dry = _fade_out(dry[: int(meta["trim_end_s"] * sr)], sr)
@@ -571,7 +575,9 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
     boost = voicefx.articulation_boost(voicefx.fx.to_sr(dry, sr)) if preset.get("articulation", True) else 0.0
     wet_mono = voicefx.mono(wet)
     speech = voicefx.speech_lufs(wet_mono)
-    if speech < voicefx.SPEECH_BURIED_LUFS:
+    if not np.isfinite(speech):
+        pass  # silent or too short to measure: nothing to say about its bass
+    elif speech < voicefx.SPEECH_BURIED_LUFS:
         warnings.append(f"the words are buried under the bass (speech band {speech:.1f} LUFS; clear takes measure "
                         f"about -21 to -23): this base voice is too boomy for EQ to fix. Try another seed.")
     elif speech < voicefx.SPEECH_QUIET_LUFS:
@@ -581,7 +587,7 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
            "blend": blend, "double_ms": double_ms, "bass_db": bass_db, "trim_end_s": meta.get("trim_end_s"),
            "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
                      "voice": voice_path.name},
-           "channels": wet.ndim, "duration_s": round(wet.shape[-1] / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1),
+           "channels": wet.ndim, "duration_s": round(wet.shape[-1] / voicefx.SR, 2), "fx_s": round(fx_s, 2), "speech_lufs": round(speech, 1) if np.isfinite(speech) else None,
            "articulation_boost_db": boost}
     if check:
         try:
@@ -1021,8 +1027,9 @@ class FxReq(BaseModel):
 def health():
     import torch
     free, total = torch.cuda.mem_get_info() if torch.cuda.is_available() else (0, 0)
+    worker = _omni  # read once: standby may set it to None meanwhile
     return {"ok": True, "tts_loaded": _tts is not None, "whisper_loaded": _asr is not None,
-            "omnivoice_loaded": _omni is not None and _omni.proc.poll() is None,
+            "omnivoice_loaded": worker is not None and worker.proc.poll() is None,
             "standby": not _loaded(), "idle_unload_min": getattr(_settings, "idle_unload", 0),
             "idle_s": round(time.monotonic() - _last_used),
             "server_reserved_gb": round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0,
@@ -1032,14 +1039,15 @@ def health():
 @app.post("/api/unload")
 def unload():
     """Free the GPU without stopping the server: every model is dropped; the next
-    request loads what it needs again (~1 min for English, with the fast paths)."""
+    request loads what it needs again (~20 s, or ~1 min if the fast paths were never compiled)."""
     with _lock:
         return unload_models("on request")
 
 
 def _loaded() -> list[str]:
+    worker = _omni
     return [name for name, on in (("tts", _tts is not None), ("whisper", _asr is not None),
-                                  ("omnivoice", _omni is not None and _omni.proc.poll() is None)) if on]
+                                  ("omnivoice", worker is not None and worker.proc.poll() is None)) if on]
 
 
 def unload_models(why: str) -> dict:
@@ -1057,7 +1065,7 @@ def unload_models(why: str) -> dict:
     reserved = round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0
     if gone:
         print(f"[local-voice] {time.strftime('%H:%M:%S')} standby ({why}): unloaded {', '.join(gone)}; "
-              f"the next request loads them again (~1 min)", flush=True)
+              f"the next request loads them again (~20 s, or ~1 min if the fast paths were never compiled)", flush=True)
     return {"unloaded": gone, "server_reserved_gb": reserved}
 
 
@@ -1109,9 +1117,11 @@ def speak(req: SpeakReq):
     stock = {v["instruction"].strip() for v in voices.values()}
     like = req.like
     # Who speaks: an explicit description wins; then a kept voice (--like); then a voice
-    # named in this request; then the user's saved description, or their saved voice.
+    # named in this request; then the user's saved description (English prose: never sent
+    # to OmniVoice as attributes), or their saved voice.
     custom = (req.instruction or "").strip() if req.instruction is not None else None
-    if custom is None and not like and "voice" not in req.model_fields_set and saved.get("instruction"):
+    if (custom is None and use_breeze and not like and "voice" not in req.model_fields_set
+            and saved.get("instruction")):
         custom = saved["instruction"].strip()
     if use_breeze:
         if custom is not None:
@@ -1258,9 +1268,10 @@ def reset_settings():
 
 @app.post("/api/fx")
 def refx(req: FxReq):
-    meta = load_take(req.id)
+    load_take(req.id)  # 400/404 before waiting for the lock
     opt = _resolve(req, ("preset", "pitch", "tempo", "reverb", "blend", "double_ms", "bass_db", "check"))
     with _lock:
+        meta = load_take(req.id)  # under the lock: a cut or undo queued before this one has landed
         res = render(req.id, meta, opt["preset"], opt["check"], opt["pitch"], opt["tempo"], opt["reverb"],
                      opt["blend"], opt["double_ms"], opt["bass_db"], req.trim_tail)
         _touch()
@@ -1320,7 +1331,7 @@ def main() -> None:
     ap.add_argument("--lazy", action="store_true", help="load the TTS model on the first request")
     ap.add_argument("--idle-unload", type=float, default=15, metavar="MIN",
                     help="standby: unload the models after this many idle minutes, freeing the GPU while the "
-                    "server keeps running (the next request reloads them, ~1 min); 0 = never (default 15)")
+                    "server keeps running (the next request reloads them, ~20 s, or ~1 min if the fast paths were never compiled); 0 = never (default 15)")
     args = ap.parse_args()
     _settings.idle_unload = max(0.0, args.idle_unload)
     if args.safe:

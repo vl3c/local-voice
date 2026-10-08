@@ -306,7 +306,7 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
+| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "voice"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names and descriptions |
 | `GET /api/voices` | | the built-in voices: name, description, seed, and each one's Romanian clone |
@@ -319,8 +319,9 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 | `DELETE /files/<take>_fx-...` | | delete one rendered file (what `--fx --no-save` does); a take's dry voice and record can't be deleted this way |
 | `GET /files/<name>` | | a WAV, MP3 or PNG from `output/` |
 
-`voice` and `instruction` omitted mean the saved or built-in voice (`ancient-male`): English, its
-description and seed; Romanian, a clone of it (made on first use). `/api/default-voice` and
+`voice` and `instruction` omitted mean the saved voice, or the built-in default (`ancient-male`):
+English, its description and seed (or, in English only, the description saved on the page);
+Romanian, a clone of it (made on first use). `/api/default-voice` and
 `/api/default-voice/restore-previous` take a `voice` (default `ancient-male`). In English `""` means none (plain TTS, or a pure clone with
 `like`). Bad input (unknown language, preset or reverb, a seed outside 0..2^32-1, blank text)
 is a 4xx with a message, not a 500. Requests must use Host `127.0.0.1` or `localhost`.
