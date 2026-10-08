@@ -89,7 +89,8 @@ def play(path: Path) -> None:
 
 
 def deliver(res: dict, out: Path | None, name: str | None, formats: str = "both") -> list[Path]:
-    """Copy the processed audio (WAV and/or MP3) and the dry WAV to `out`, never overwriting."""
+    """Copy the processed audio (WAV and/or MP3), its aligned voice stem and the dry WAV to `out`,
+    never overwriting."""
     paths = []
     for kind, fname in res.get("files", {}).items():
         src = OUTPUT / fname
@@ -99,10 +100,10 @@ def deliver(res: dict, out: Path | None, name: str | None, formats: str = "both"
         if kind == "spectrogram":
             paths.append(src)  # review material, not a deliverable
             continue
-        if (kind in ("wet", "dry") and formats == "mp3") or (kind == "mp3" and formats == "wav"):
-            continue  # mp3: just the MP3 (for messengers); wav: the processed and dry WAVs
+        if (kind in ("wet", "dry", "voice") and formats == "mp3") or (kind == "mp3" and formats == "wav"):
+            continue  # mp3: just the MP3 (for messengers); wav: the WAVs (processed, voice, dry)
         out.mkdir(parents=True, exist_ok=True)
-        stem = (name + ("_dry" if kind == "dry" else "")) if name else Path(fname).stem
+        stem = (name + {"dry": "_dry", "voice": "_voice"}.get(kind, "")) if name else Path(fname).stem
         dest = out / f"{stem}{src.suffix}"
         i = 1
         while dest.exists():
@@ -155,8 +156,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, help="copy results here (never overwrites)")
     ap.add_argument("--name", help="file name stem for --out")
     ap.add_argument("--format", choices=["both", "wav", "mp3"], default="both",
-                    help="what --out copies: both (default: processed WAV + MP3 + dry WAV), wav (processed + dry "
-                    "WAV) or mp3 (just the MP3, e.g. for WhatsApp). --out creates the folder if needed")
+                    help="what --out copies: both (default: processed WAV + MP3, the aligned voice WAV and the dry "
+                    "WAV), wav (the same without the MP3) or mp3 (just the MP3, e.g. for WhatsApp). --out creates "
+                    "the folder if needed")
     ap.add_argument("--wait", type=float, default=5, help="seconds to wait for the server to come up")
     ap.add_argument("--json", action="store_true", help="print the raw server response")
     ap.add_argument("--no-save", action="store_true",

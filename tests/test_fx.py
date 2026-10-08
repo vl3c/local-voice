@@ -116,3 +116,54 @@ def test_presets_end_at_the_same_loudness():
     x, sr = fake_voice(seconds=3.0)
     levels = [fx.loudness(voicefx.apply(x, sr, voicefx.load_preset(n))) for n in voicefx.list_presets()]
     assert max(levels) - min(levels) < 0.5
+
+
+def bursts(sr=24000):
+    """Word-like bursts at irregular times, so a timing offset can't hide behind periodicity."""
+    t = np.arange(int(sr * 2.0)) / sr
+    src = np.sign(np.sin(2 * np.pi * 110 * t)) + 0.3 * np.random.default_rng(1).standard_normal(len(t))
+    gate = np.zeros(len(t))
+    for start, length in ((0.10, 0.12), (0.41, 0.20), (0.83, 0.07), (1.20, 0.25)):
+        gate[int(start * sr):int((start + length) * sr)] = 1.0
+    return (0.3 * src * gate).astype(np.float32), sr
+
+
+def lag_ms(ref, y, lo=300.0, hi=4000.0, max_ms=120):
+    """How late `y` is relative to `ref`, from their 300 Hz-4 kHz envelopes, in ms."""
+    from scipy import signal
+    sos = signal.butter(4, [lo / (fx.SR / 2), hi / (fx.SR / 2)], "band", output="sos")
+    smooth = signal.butter(2, 60 / (fx.SR / 2), output="sos")
+    env = lambda x: signal.sosfiltfilt(smooth, np.abs(signal.sosfiltfilt(sos, x)))[::48]  # noqa: E731
+    a, b = env(ref), env(y)
+    n = min(len(a), len(b))
+    a, b = a[:n] - a[:n].mean(), b[:n] - b[:n].mean()
+    lags = range(-max_ms, max_ms + 1)
+    score = [np.dot(a[max(0, -k):n - max(0, k)], b[max(0, k):n - max(0, -k)]) for k in lags]
+    return lags[int(np.argmax(score))]
+
+
+def test_vocoder_speaks_in_time():
+    x, sr = bursts()
+    v = fx.to_sr(x, sr)
+    assert abs(lag_ms(v, fx.op_vocoder(v, f0=43.65, chord=(1, 2)))) <= 3
+    assert lag_ms(v, fx.op_vocoder(v, f0=43.65, chord=(1, 2), phase="causal")) >= 5  # the old filters' delay
+
+
+@pytest.mark.parametrize("name", sorted(voicefx.list_presets()))
+def test_voice_layer_is_aligned(name):
+    x, sr = bursts()
+    wet, voice = voicefx.apply_layers(x, sr, voicefx.load_preset(name), pitch=-3, tempo=0.85, reverb="room")
+    assert len(voice) == len(wet)
+    assert abs(fx.loudness(voice) - fx.TARGET_LUFS) < 0.5
+    # The presets' compressor front-loads each burst, which reads as the wet arriving a few ms
+    # early (2 ms without it). That's envelope shape, not delay: the old filters were 10-90 ms late.
+    assert abs(lag_ms(voice, wet)) <= 8
+
+
+def test_stretch_runs_first_wherever_it_is_written():
+    x, sr = bursts()
+    late = {"pre": [{"op": "highpass", "hz": 70}, {"op": "stretch", "rate": 0.8}]}
+    early = {"pre": [{"op": "stretch", "rate": 0.8}, {"op": "highpass", "hz": 70}]}
+    a, b = voicefx.apply(x, sr, late), voicefx.apply(x, sr, early)
+    assert len(a) == len(b) and np.allclose(a, b, atol=1e-4)
+

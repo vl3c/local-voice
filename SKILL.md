@@ -146,7 +146,7 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
 | `--check` / `--no-check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. **On by default**; `--no-check` saves ~1 s when you don't need it. |
 | `--out DIR` / `--name STEM` | Copy the take to DIR (created if needed; never overwrites). Works with `--fx` to export an existing take. |
-| `--format F` | With `--out`: `both` (default: processed WAV + MP3 + the dry WAV), `wav` (processed + dry WAVs) or `mp3` (just the processed MP3). **WhatsApp and most messengers reject WAV**: use `mp3` for those. |
+| `--format F` | With `--out`: `both` (default: processed WAV + MP3, the voice stem WAV and the dry WAV), `wav` (the same without the MP3) or `mp3` (just the processed MP3). **WhatsApp and most messengers reject WAV**: use `mp3` for those. |
 | `--wait S` | Wait up to S seconds for the server. |
 | `--json` | Only the server's JSON (plus `paths`): parse this rather than the text output. |
 | `--play` | Play the processed take on the user's speakers when it's ready; returns when playback ends. Exit 1 if it couldn't play. |
@@ -168,7 +168,9 @@ and settings can be compared, and clips cut together, without volume jumps.
 
 **Takes:** every generation is a *take* with an id like `20260101-120000-ab12`. Its files live in
 `output/`: `<id>_dry.wav` (24 kHz, the voice as generated), `<id>_fx-<preset>[_pitch-4][_tempo0.85][_hall].wav`
-and `.mp3` (48 kHz, processed; one pair per effects combination), `<id>.json` (text, instruction,
+and `.mp3` (48 kHz, processed; one pair per effects combination), `..._voice.wav` (the human
+voice under that render, sample-aligned with it: same tempo, pitch, reverb, length and loudness,
+for mixing machine and human in an edit), `<id>.json` (text, instruction,
 seed: everything to redo it), and a matching `.png` with `--check`. Responses may carry
 `warnings` (the CLI prints them as `WARNING:`) and `check_error` (the take is fine, the check
 failed): relay warnings to the user.

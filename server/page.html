@@ -112,7 +112,7 @@
         <label for="reverb">Reverb</label>
         <select id="reverb"><option value="none">None</option><option value="room" selected>Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option></select>
       </div>
-      <div data-tip="Time-stretch of the finished sound, 0.5-1.5: below 1 is slower, without changing pitch. Works in both languages. Re-run effects to try another value without regenerating.">
+      <div data-tip="Time-stretch, 0.5-1.5: below 1 is slower, without changing pitch. Applied to the voice before the effects, together with the preset's own slow-down. Works in both languages. Re-run effects to try another value without regenerating.">
         <label for="tempo">Tempo</label>
         <input id="tempo" type="number" value="1" min="0.5" max="1.5" step="0.05">
       </div>
@@ -354,7 +354,8 @@ function renderTake(res, autoplay) {
 
   const dl = el("span", {class: "dl"},
     el("a", {href: "/files/" + encodeURIComponent(res.files.wet), download: res.files.wet, tip: "Download the processed audio as WAV (lossless, 48 kHz)."}, "WAV"),
-    res.files.mp3 ? el("a", {href: "/files/" + encodeURIComponent(res.files.mp3), download: res.files.mp3, tip: "Download as MP3: what WhatsApp and most messengers accept."}, "MP3") : null);
+    res.files.mp3 ? el("a", {href: "/files/" + encodeURIComponent(res.files.mp3), download: res.files.mp3, tip: "Download as MP3: what WhatsApp and most messengers accept."}, "MP3") : null,
+    res.files.voice ? el("a", {href: "/files/" + encodeURIComponent(res.files.voice), download: res.files.voice, tip: "Download the human voice under the effects as WAV: sample-aligned with the processed audio, with the same pitch, tempo, reverb, length and loudness. Lay it under the processed track in an edit to mix machine and human."}, "voice WAV") : null);
   box.append(el("div", {class: "lbl", tip: "The final audio with the preset applied (48 kHz). Plays automatically when the take arrives."}, "processed", dl));
   for (const w of (res.warnings || [])) box.append(el("div", {class: "warn"}, "⚠ " + w));
   if (res.sentences && res.sentences.some(x => x.tries > 1)) {

@@ -515,18 +515,23 @@ def render(tid: str, meta: dict, preset_name: str, check: bool, pitch: float = 0
 
     dry, sr = sf.read(take_paths(tid)["dry"], dtype="float32")
     t0 = time.time()
-    wet = voicefx.apply(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb)
+    wet, voice = voicefx.apply_layers(dry, sr, preset, pitch=pitch, tempo=tempo, reverb=reverb)
     fx_s = time.time() - t0
     # "fx-" keeps every preset, including one called "dry", off the take's own files.
     wet_path = OUTPUT / f"{tid}_{_fx_name(preset_name, pitch, tempo, reverb)}.wav"
     sf.write(wet_path, wet, voicefx.SR, subtype="PCM_16")
+    # The human voice under the effects: same timing (sample for sample), pitch, reverb,
+    # length and loudness as the processed take, for blending in an edit.
+    voice_path = wet_path.with_name(wet_path.stem + "_voice.wav")
+    sf.write(voice_path, voice, voicefx.SR, subtype="PCM_16")
     # An MP3 too: WhatsApp and most messengers won't take WAV as audio.
     mp3_path = wet_path.with_suffix(".mp3")
     sf.write(mp3_path, wet, voicefx.SR, format="MP3", subtype="MPEG_LAYER_III",
              bitrate_mode="CONSTANT", compression_level=0.3)
 
     res = {"id": tid, "preset": preset_name, "pitch": pitch, "tempo": tempo, "reverb": reverb,
-           "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name},
+           "files": {"dry": take_paths(tid)["dry"].name, "wet": wet_path.name, "mp3": mp3_path.name,
+                     "voice": voice_path.name},
            "duration_s": round(len(wet) / voicefx.SR, 2), "fx_s": round(fx_s, 2)}
     if check:
         try:

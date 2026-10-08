@@ -3,6 +3,10 @@
   "instruction": "An immense, ancient male voice, deep and gravelly with a hard, metallic edge. Speaks slowly with contempt and total certainty, cold and commanding, each word heavy and deliberate.",
   "pre": [
     {
+      "op": "stretch",
+      "rate": 0.94
+    },
+    {
       "op": "highpass",
       "hz": 70
     },
@@ -13,10 +17,6 @@
       "attack_ms": 3,
       "release_ms": 100,
       "makeup_db": 7
-    },
-    {
-      "op": "stretch",
-      "rate": 0.94
     }
   ],
   "buses": [

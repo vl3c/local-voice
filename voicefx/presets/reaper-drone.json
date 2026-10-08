@@ -3,6 +3,10 @@
   "instruction": "Ancient male, massive scale. Deep, resonant bass, gravelly, subterranean. Speaks very slowly and calmly with cold, absolute authority and no emotion, every word measured and final, long pauses between phrases.",
   "pre": [
     {
+      "op": "stretch",
+      "rate": 0.92
+    },
+    {
       "op": "highpass",
       "hz": 70
     },
@@ -13,10 +17,6 @@
       "attack_ms": 4,
       "release_ms": 120,
       "makeup_db": 6
-    },
-    {
-      "op": "stretch",
-      "rate": 0.92
     }
   ],
   "buses": [

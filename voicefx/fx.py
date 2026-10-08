@@ -2,7 +2,9 @@
 
 A preset (voicefx/presets/*.json) is a small signal graph:
 
-    pre    one chain run on the dry voice (slow it down, clean it up, compress)
+    pre    one chain run on the dry voice (slow it down, clean it up, compress);
+           its `stretch` ops always run first, as one stretch with the take's tempo,
+           so a clean copy of the voice stays aligned with the result (apply_layers)
     buses  parallel chains, each fed the output of `pre`, mixed at `gain_db`
     post   one chain run on the mix (distortion, EQ, space, limiter)
 
@@ -222,7 +224,7 @@ def brass(freq: np.ndarray, chord=(1.0,), detune=(-6.0, 0.0, 7.0), metal: float 
 
 
 def op_vocoder(x, f0=43.65, chord=(1.0,), follow=0.0, steps=0.0, bands=36, fmin=50.0, fmax=8000.0,
-               noise=0.1, fricatives=1.0, metal=0.0, sub=0.0, smooth_ms=10.0, **_):
+               noise=0.1, fricatives=1.0, metal=0.0, sub=0.0, smooth_ms=10.0, phase="zero", **_):
     """Channel vocoder: the voice's band envelopes imposed on a synthetic carrier.
 
     The carrier is a brass machine tone (see `brass`) at f0 - steady, or
@@ -230,26 +232,39 @@ def op_vocoder(x, f0=43.65, chord=(1.0,), follow=0.0, steps=0.0, bands=36, fmin=
     so the machine itself does the speaking. Where the voice is hissing (s, sh,
     f, t) the carrier crossfades to noise, scaled by `fricatives`, which keeps
     consonants intelligible; `noise` is a constant breath under everything.
+
+    phase="zero" (the default) filters forwards and backwards, so the machine
+    speaks exactly in time with the voice. phase="causal" is the original
+    one-pass filtering: the same bands, but each arrives late by its filters'
+    delay (~80 ms under 200 Hz, ~25 ms at 300 Hz-1 kHz, ~10 ms at 1-4 kHz), so
+    the result can't be blended with the voice that drove it.
     """
+    zero = phase == "zero"
+    if phase not in ("zero", "causal"):
+        raise ValueError(f"vocoder phase must be 'zero' or 'causal', not {phase!r}")
+    # Forward-backward doubles each filter's slope, so the zero-phase path uses half the order:
+    # the same steepness, no delay.
+    filt = signal.sosfiltfilt if zero else signal.sosfilt
+    order = 2 if zero else 4
     n = len(x)
     tone = brass(_carrier_f0(x, f0, follow, steps), chord=chord, metal=metal, sub=sub)
     tone *= 0.577 / max(_rms(tone), 1e-9)  # a plain saw's RMS, so noise levels mean the same thing
     hiss = np.random.default_rng(7).standard_normal(n) * 0.577
 
     # How fricative the voice is right now: high-band share of its energy.
-    env_lp = _lowpass_sos(1000.0 / (np.pi * 15.0))
-    e_hi = signal.sosfilt(env_lp, np.abs(signal.sosfilt(signal.butter(4, 3500 / (SR / 2), "high", output="sos"), x)))
-    e_all = signal.sosfilt(env_lp, np.abs(x))
+    env_lp = _lowpass_sos(1000.0 / (np.pi * 15.0), order // 2)
+    e_hi = filt(env_lp, np.abs(filt(signal.butter(order, 3500 / (SR / 2), "high", output="sos"), x)))
+    e_all = filt(env_lp, np.abs(x))
     u = np.clip((e_hi / (e_all + 1e-6) - 0.15) / 0.35, 0, 1) * float(fricatives)
     carrier = tone * (1 - np.clip(u, 0, 1)) + hiss * (u + float(noise))
 
     edges = np.geomspace(fmin, fmax, int(bands) + 1)
-    lp = _lowpass_sos(1000.0 / (np.pi * smooth_ms))  # envelope smoother
+    lp = _lowpass_sos(1000.0 / (np.pi * smooth_ms), order // 2)  # envelope smoother
     out = np.zeros(n)
     for lo, hi in zip(edges[:-1], edges[1:]):
-        sos = signal.butter(4, [lo / (SR / 2), hi / (SR / 2)], btype="band", output="sos")
-        env = signal.sosfilt(lp, np.abs(signal.sosfilt(sos, x)))
-        out += signal.sosfilt(sos, carrier) * np.maximum(env, 0)
+        sos = signal.butter(order, [lo / (SR / 2), hi / (SR / 2)], btype="band", output="sos")
+        env = filt(lp, np.abs(filt(sos, x)))
+        out += filt(sos, carrier) * np.maximum(env, 0)
     out = out.astype(np.float32)
     return out * (_rms(x) / max(_rms(out), 1e-9))
 
@@ -339,27 +354,36 @@ def load_preset(name: str) -> dict:
 
 def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
           reverb: str = "none", target_lufs: float = -16.0, tail_s: float = 2.5) -> np.ndarray:
-    """Run a preset over mono audio at any rate; returns 48 kHz mono float32.
+    """Run a preset over mono audio at any rate; returns 48 kHz mono float32 (see apply_layers)."""
+    return apply_layers(audio, sr, preset, pitch, tempo, reverb, target_lufs, tail_s)[0]
 
-    pitch (semitones) and tempo (1 = as generated, below 1 = slower) apply to the
-    finished sound, after the preset: pitch moves everything down together, the
-    machine's tone and the size of its "throat" alike, like a bigger instrument;
-    tempo changes speed without changing pitch. reverb (a REVERBS key) adds a space last.
-    Every take ends at the same loudness, `target_lufs` (see normalise_loudness).
+
+def apply_layers(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: float = 1.0,
+                 reverb: str = "none", target_lufs: float = -16.0,
+                 tail_s: float = 2.5) -> tuple[np.ndarray, np.ndarray]:
+    """Run a preset over mono audio at any rate: (processed, voice), both 48 kHz mono float32.
+
+    Timing is settled first: every `stretch` op in the preset's `pre` chain, and
+    tempo (1 = as generated, below 1 = slower), are one time-stretch of the clean
+    voice before anything else runs. That stretched voice is `voice`: the human
+    layer, sample-aligned with the processed take, given the same pitch and reverb
+    and the same length, for blending under (or over) the machine.
+
+    pitch (semitones) applies to the finished sound, after the preset: it moves
+    everything down together, the machine's tone and the size of its "throat"
+    alike, like a bigger instrument. reverb (a REVERBS key) adds a space last.
+    Both layers end at the same loudness, `target_lufs` (see normalise_loudness).
 
     Empty input gives empty output; silence (and NaN/inf, treated as silence)
     gives silence of the same length rather than amplified noise.
     """
-    x = np.nan_to_num(np.asarray(audio, dtype=np.float32).reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
-    if not len(x):
-        return np.zeros(0, dtype=np.float32)
-    x = to_sr(x, sr)
-    if _peak(x) < SILENCE:
-        return np.zeros(len(x), dtype=np.float32)
-    x /= _peak(x) / 0.5
-    x = np.pad(x, (0, int(tail_s * SR)))  # room for reverb tails and delays
-
-    x = chain(x, preset.get("pre", []))
+    if reverb not in REVERBS:
+        raise ValueError(f"unknown reverb {reverb!r}; choose from {', '.join(REVERBS)}")
+    voice = timed_voice(audio, sr, preset, tempo, tail_s)
+    if not len(voice) or _peak(voice) < SILENCE:
+        return np.zeros(len(voice), dtype=np.float32), np.zeros(len(voice), dtype=np.float32)
+    pre = [op for op in preset.get("pre", []) if not op.get("off")]
+    x = chain(voice, [op for op in pre if op["op"] != "stretch"])
 
     # Buses may change length (a stretch inside one): mix at the longest.
     outs = [(chain(x.copy(), bus.get("chain", [])), db(bus.get("gain_db", 0.0)))
@@ -370,17 +394,39 @@ def apply(audio: np.ndarray, sr: int, preset: dict, pitch: float = 0.0, tempo: f
         mix += fit(y, n) * g
 
     y = np.nan_to_num(chain(mix, preset.get("post", [])))
+    voice = fit(voice, len(y))
     if pitch:
         y = op_pitch(y, semitones=pitch, preserve_formants=False)
-    if tempo != 1.0:
-        y = op_stretch(y, rate=tempo)
-    if reverb not in REVERBS:
-        raise ValueError(f"unknown reverb {reverb!r}; choose from {', '.join(REVERBS)}")
-    y = op_space(_trim_tail(np.nan_to_num(y)), reverb)
+        voice = op_pitch(voice, semitones=pitch, preserve_formants=False)
     y = _trim_tail(np.nan_to_num(y))
+    voice = op_space(fit(voice, len(y)), reverb)
+    y = _trim_tail(np.nan_to_num(op_space(y, reverb)))
+    voice = _fade_end(fit(voice, len(y)))
     if _peak(y) < SILENCE:
-        return np.zeros(len(y), dtype=np.float32)
-    return normalise_loudness(y, target_lufs)
+        return np.zeros(len(y), dtype=np.float32), normalise_loudness(voice, target_lufs)
+    return normalise_loudness(y, target_lufs), normalise_loudness(voice, target_lufs)
+
+
+def timed_voice(audio: np.ndarray, sr: int, preset: dict, tempo: float = 1.0, tail_s: float = 2.5) -> np.ndarray:
+    """The clean voice on a render's timeline: 48 kHz, peak 0.5, stretched by the preset's
+    `stretch` ops and tempo, before any effect. Sample 0 is the render's sample 0, so a
+    time measured on this is a time in the render."""
+    x = np.nan_to_num(np.asarray(audio, dtype=np.float32).reshape(-1), nan=0.0, posinf=0.0, neginf=0.0)
+    if not len(x):
+        return x
+    x = to_sr(x, sr)
+    if _peak(x) < SILENCE:
+        return np.zeros(len(x), dtype=np.float32)
+    x /= _peak(x) / 0.5
+    x = np.pad(x, (0, int(tail_s * SR)))  # room for reverb tails and delays
+    return op_stretch(x, rate=stretch_rate(preset, tempo))
+
+
+def stretch_rate(preset: dict, tempo: float = 1.0) -> float:
+    """The one time-stretch a render applies: the preset's `stretch` ops times tempo.
+    A time t in the render is t * stretch_rate in the dry take."""
+    pre = [op for op in preset.get("pre", []) if not op.get("off")]
+    return float(np.prod([op.get("rate", 1.0) for op in pre if op["op"] == "stretch"])) * tempo
 
 
 TARGET_LUFS = -16.0   # speech on phones, podcasts, messengers
@@ -450,7 +496,12 @@ def _trim_tail(x: np.ndarray, floor_db: float = -60.0) -> np.ndarray:
     if not len(loud):
         return x
     end = min(len(x), loud[-1] + int(0.05 * SR))
-    y = x[:end].copy()
-    fade = min(len(y), int(0.05 * SR))
-    y[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
+    return _fade_end(x[:end])
+
+
+def _fade_end(x: np.ndarray, seconds: float = 0.05) -> np.ndarray:
+    y = x.copy()
+    fade = min(len(y), int(seconds * SR))
+    if fade:
+        y[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
     return y

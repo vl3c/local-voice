@@ -60,11 +60,17 @@ are two stages:
    (s, sh, f, t) the carrier crossfades to noise, which keeps consonants intelligible. Then
    brassy distortion, EQ and a metal-tube resonance. The presets are **dry** (no reverb or echo):
    a clean, close voice.
-3. **Finishing (optional, any preset).** `pitch` (semitones; negative is lower and bigger: the
-   machine's tone and its "throat" move down together), `tempo` (time-stretch, same pitch) and
-   `reverb` (`none`, `room`, `hall`, `cathedral`). They are applied to the finished sound, so
-   re-running them on an existing take takes a second or two.
-4. **Loudness.** Every take ends normalised to **-16 LUFS** (ITU-R BS.1770 integrated loudness,
+3. **Finishing (optional, any preset).** `tempo` (time-stretch, same pitch) is applied first,
+   together with the preset's own slow-down, as one stretch of the clean voice. `pitch`
+   (semitones; negative is lower and bigger: the machine's tone and its "throat" move down
+   together) and `reverb` (`none`, `room`, `hall`, `cathedral`) are applied to the finished
+   sound. Re-running them on an existing take takes a second or two.
+4. **The voice stem.** Every render also writes `..._voice.wav`: the human voice the machine was
+   driven by, sample-aligned with the processed take, with the same tempo, pitch, reverb, length
+   and loudness. Lay it under the processed track to mix machine and human. (The vocoder filters
+   forwards and backwards so the machine speaks exactly in time with the voice; one-pass filters
+   made it 10-90 ms late depending on pitch, which sounded doubled when blended.)
+5. **Loudness.** Every take ends normalised to **-16 LUFS** (ITU-R BS.1770 integrated loudness,
    the usual target for speech on phones and podcasts) with peaks held under -1 dBFS, so all
    presets, pitches and reverbs play at the same perceived volume.
 
@@ -207,8 +213,8 @@ python scripts\say.py --presets
 | `--settings` | Show the defaults in effect (built-in, or saved in `config.local.json`). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take; no new generation. |
 | `--check` / `--no-check` | Whisper transcribes dry and processed audio, prints a words-heard score, and draws a spectrogram. On by default. |
-| `--out DIR` / `--name STEM` | Copy the processed audio and the dry WAV to DIR (never overwrites). |
-| `--format F` | With `--out`: `both` (default: processed WAV + MP3 + dry WAV), `wav` (processed + dry WAVs) or `mp3` (just the MP3: WhatsApp and most messengers take MP3, not WAV). |
+| `--out DIR` / `--name STEM` | Copy the processed audio, its voice stem and the dry WAV to DIR (never overwrites). |
+| `--format F` | With `--out`: `both` (default: processed WAV + MP3, voice stem WAV and dry WAV), `wav` (the same without the MP3) or `mp3` (just the MP3: WhatsApp and most messengers take MP3, not WAV). |
 | `--wait S` | Wait up to S seconds for the server (startup takes ~60 s). |
 | `--json` | Print only the server's JSON response, plus `paths` (the delivered files). |
 | `--play` | Play the processed take on this machine's speakers; returns when playback ends (exit 1 if it couldn't play). |
@@ -234,7 +240,7 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, spectrogram), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
+| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice, spectrogram), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names, descriptions, suggested voice descriptions |
 | `GET /api/health` | | which models are loaded, VRAM |
@@ -262,6 +268,7 @@ Every generation is a *take*, with an id like `20260101-120000-ab12`. Its files 
 |---|---|
 | `<id>_dry.wav` | the voice as generated, 24 kHz (Breeze or OmniVoice) |
 | `<id>_fx-<preset>[_pitch-4][_tempo0.85][_hall].wav` / `.mp3` | processed, 48 kHz; one pair per combination of effect settings |
+| `<id>_fx-...._voice.wav` | the human voice under that render: sample-aligned, same tempo, pitch, reverb, length and loudness |
 | `<id>.json` | text, language, model, instruction, seed, cfg or speed: everything needed to redo it |
 | `<id>_fx-....png` | waveform and spectrogram (with `check`) |
 
@@ -269,7 +276,7 @@ Every generation is a *take*, with an id like `20260101-120000-ab12`. Its files 
 
 The page at http://127.0.0.1:8190/ does the same: text, language, preset (which loads its
 suggested voice description), voice description, seed, strength (English) or speed (Romanian),
-pitch, tempo, reverb, **Transcribe + spectrogram**, and per take: **WAV** / **MP3** download
+pitch, tempo, reverb, **Transcribe + spectrogram**, and per take: **WAV** / **MP3** / **voice WAV** download
 links, an **Effects** box (another preset, pitch, tempo or reverb on the same take, no
 regeneration), **Clone voice for next lines** (later lines clone it, in either language), **Set as default
 voice** (what Romanian clones when the voice attributes are left empty) and **Load settings**
