@@ -110,6 +110,9 @@ nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader   # who h
 ~10 GB with Whisper, and ~12.6 GB once Romanian has been used (the OmniVoice worker adds ~2.7 GB).
 If another program holds most of the GPU (a local LLM server, an image generator), they won't fit
 together: **ask the user** before stopping it, and stop it the way it's meant to be stopped.
+If the `local-gpu` skill is installed, use it for this instead:
+`python ~/.claude/skills/local-gpu/gpu.py switch local-voice` shows what holds the GPU, stops it
+through its own stop script only after the user confirms, then starts this server and waits for it.
 
 **Start the server in its own window:**
 

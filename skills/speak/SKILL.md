@@ -41,7 +41,9 @@ skill's own folder with `..`: the skills are links, and `..` resolves to the wro
    ```
 
    If another program holds most of the GPU (a local LLM server, an image generator), **ask the
-   user** before stopping it; they may be using it. Then start
+   user** before stopping it; they may be using it. If the `local-gpu` skill is installed,
+   `python ~/.claude/skills/local-gpu/gpu.py switch local-voice` does this step and the next
+   (it asks before stopping anything). Otherwise start
    the voice server. It opens in its own window (titled "local-voice server - close this window to
    stop it") and the command returns at once:
 
