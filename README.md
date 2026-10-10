@@ -316,7 +316,7 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names and descriptions |
 | `GET /api/voices` | | the built-in voices: `name`, `instruction`, `seed`, `about`, `romanian` (the catalog's `use`, `attributes`, `seed`) and `romanian_takes` (the stored `clone` and `native` takes, or null) |
-| `GET /api/health` | | which models are loaded, VRAM |
+| `GET /api/health` | | which models are loaded, `busy`, VRAM (whole card) |
 | `GET` / `POST /api/default-voice` | `{"id", "voice"?, "kind"?}` to set (`?voice=&kind=` to read) | the stored take a voice's Romanian lines clone (`kind`: `clone`, `native`, or `auto`, the default: the kind they use now): source take id, text, median pitch, `previous` |
 | `POST /api/default-voice/restore-previous` | `{"voice"?, "kind"?}` | swap back to the previous one |
 | `GET` / `POST` / `DELETE /api/settings` | the settings to save | `effective`, `saved`, `repo` defaults; save / reset `config.local.json` |
