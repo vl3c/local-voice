@@ -18,9 +18,14 @@ jobs:
   # The whole suite runs without a GPU or model weights: the models are faked
   # (tests/test_server.py), so this checks the server, effects, word timings, CLI,
   # scripts and the page contract. The job name is the required status check.
+  # Windows, the platform the tool targets: the pinned pedalboard's Linux wheel
+  # dies with "Illegal instruction" on the hosted Ubuntu runners.
   tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
