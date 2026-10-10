@@ -1,0 +1,16 @@
+# What the test suite needs, for CI: no GPU, no model weights, no engine checkout.
+# The same versions as the real install (requirements.txt, and the engine's own pins).
+# torch comes from the CPU wheel index (see .github/workflows/tests.yml).
+pedalboard==0.9.25
+praat-parselmouth==0.4.7
+matplotlib==3.11.2
+scipy==1.18.1
+numpy==2.5.3
+soundfile==0.14.0
+num2words==0.5.14
+fastapi==0.142.2
+starlette==1.7.0
+pydantic==2.13.5
+uvicorn==0.54.0
+httpx==0.28.1
+pytest==9.1.1
