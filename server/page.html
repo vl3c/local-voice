@@ -301,10 +301,11 @@ async function setDefaultVoice(res) {
   let cur = null;
   try { const h = await api(`/api/default-voice?voice=${encodeURIComponent(voice)}&kind=${kind}`); cur = h.id ? h : null; } catch (e) {}
   if (cur && cur.id === id) { $("status").textContent = `Take ${id} already is the ${name}'s ${label}.`; return; }
-  const used = roKind() === kind ? "Romanian lines with this voice use it now"
-    : `it is used when the Romanian voice setting picks the ${kind === "native" ? "native voice" : "clone"} (now it picks the other)`;
-  if (!confirm(`Make take ${id} the ${name}'s ${label}?\n\n${used[0].toUpperCase() + used.slice(1)}, from this page and from ` +
-      `agents, when the voice attributes are left empty.\n\nCurrent: ${cur ? `take ${cur.id} (${cur.f0_hz} Hz)` : "none yet"}. ` +
+  const which = kind === "native" ? "the native voice" : "the clone";
+  const now = roKind() === kind ? `This page's setting picks ${which} now.` : `This page's setting picks the other one now.`;
+  if (!confirm(`Make take ${id} the ${name}'s ${label}?\n\nRomanian lines with this voice use it whenever the Romanian ` +
+      `voice setting picks ${which} (agents follow your saved setting; Recommended picks ${voices[voice]?.romanian?.use === "native" ? "the native voice" : "the clone"} ` +
+      `for this voice). ${now}\n\nCurrent: ${cur ? `take ${cur.id} (${cur.f0_hz} Hz)` : "none yet"}. ` +
       `It is remembered, so you can switch back.`)) return;
   try {
     const set = await api("/api/default-voice", {id, voice, kind});

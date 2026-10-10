@@ -378,3 +378,28 @@ def test_auto_follows_the_saved_romanian_choice(server):
     assert server.resolve_kind("young-woman") == "clone"
     c = client(server)
     assert c.get("/api/default-voice?voice=young-woman").json()["kind"] == "clone"
+
+
+def test_a_romanian_take_stored_as_a_clone_stays_a_clone(server):
+    """Review finding: the migration must not move takes stored after it."""
+    c = client(server)
+    ro = make_take(server, "20260101-120000-0002", text="Bună.", language="ro")
+    assert c.post("/api/default-voice", json={"id": ro, "voice": "child", "kind": "clone"}).json()["id"] == ro
+    assert c.get("/api/default-voice?voice=child&kind=clone").json()["id"] == ro
+    yw = make_take(server, "20260101-120000-0003", text="Bună.", language="ro")
+    c.post("/api/default-voice", json={"id": yw, "voice": "young-woman", "kind": "clone"})
+    assert c.get("/api/default-voice?voice=young-woman&kind=clone").json()["id"] == yw  # not moved later either
+
+
+def test_the_api_resolves_auto_to_the_kind_romanian_lines_use(server):
+    c = client(server)
+    first = make_take(server, "20260101-120000-0004", text="Bună.", language="ro")
+    second = make_take(server, "20260101-120000-0005", text="Bună.", language="ro")
+    r = c.post("/api/default-voice", json={"id": first, "voice": "young-woman"}).json()   # no kind: auto
+    assert r["kind"] == "native" and (server.VOICES / "young-woman.ro.wav").is_file()
+    assert not (server.VOICES / "young-woman.wav").exists()
+    c.post("/api/default-voice", json={"id": second, "voice": "young-woman"})
+    back = c.post("/api/default-voice/restore-previous", json={"voice": "young-woman"}).json()
+    assert back["id"] == first and back["kind"] == "native"
+    r = c.post("/api/default-voice", json={"id": first, "voice": "child"}).json()          # auto for child: clone
+    assert r["kind"] == "clone" and (server.VOICES / "child.wav").is_file()

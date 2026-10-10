@@ -770,17 +770,31 @@ def _slots(voice: str, kind: str = "clone") -> tuple[str, str]:
     return ("default", "previous") if voice == DEFAULT_VOICE else (voice, f"{voice}.previous")
 
 
-def _migrate_slots(voice: str) -> None:
-    """Before stored takes had kinds, a voice's native Romanian take (young-woman's) lived in its
-    clone slot, voices/<voice>.*. Move a Romanian take found there (and its previous) to the
-    native slot, once, so it keeps being the native voice and the clone slot is free."""
-    if voice == DEFAULT_VOICE:
-        return
-    for old, new in zip(_slots(voice, "clone"), _slots(voice, "native")):
-        info = _read_slot(old)
-        if info.get("language") == "ro" and not _read_slot(new):
-            for a, b in zip(_slot(old), _slot(new)):
-                a.replace(b)
+_SLOTS_V2 = ".slots-v2"  # in voices/: this folder's stored takes are kept per kind
+_migrate_lock = threading.Lock()
+
+
+def _migrate_slots(_voice: str | None = None) -> None:
+    """Once per voices/ folder: move takes stored before kinds existed to where they now belong.
+
+    Back then a voice whose Romanian is native (romanian.use "native": young-woman) kept its
+    native take in its plain slot, voices/<voice>.*, which is now its clone slot. Such a take
+    (a Romanian recording) moves to <voice>.ro.*, with its previous. Only those voices, and
+    only once: afterwards a Romanian take stored on purpose as a clone stays a clone.
+    """
+    with _migrate_lock:
+        if (VOICES / _SLOTS_V2).is_file():
+            return
+        if VOICES.is_dir():
+            for voice, spec in voice_catalog().items():
+                if voice == DEFAULT_VOICE or (spec.get("romanian") or {}).get("use") != "native":
+                    continue
+                for old, new in zip(_slots(voice, "clone"), _slots(voice, "native")):
+                    if _read_slot(old).get("language") == "ro" and not _read_slot(new):
+                        for a, b in zip(_slot(old), _slot(new)):
+                            a.replace(b)
+        VOICES.mkdir(exist_ok=True)
+        (VOICES / _SLOTS_V2).write_text("stored takes are kept per kind (clone / native)\n", encoding="utf-8")
 
 
 def resolve_kind(voice: str, choice: str = "auto") -> str:
