@@ -4,9 +4,10 @@ A private, fully local text-to-speech service for **non-human voices**, in **Eng
 Romanian**, built for AI agents (and people) to call. Describe a voice and a mood, give it a
 line, and get back a colossal machine intelligence: Mass Effect's Reapers are the reference.
 
-It runs **Breeze TTS 2** (English; the top open-weights voice-design TTS model as of autumn
-2026) and **OmniVoice** (Romanian, with correct diacritics and numbers) on your own GPU, then
-turns the voice into a machine with a vocoder-based sound-design chain. No accounts, no cloud:
+It runs open-weights speech models on your own GPU (currently Breeze TTS 2 for English, the
+top open-weights voice-design TTS model as of autumn 2026, and OmniVoice for Romanian, with
+correct diacritics and numbers), then turns the voice into a machine with a vocoder-based
+sound-design chain. No accounts, no cloud:
 text and audio never leave the machine.
 
 ```powershell
