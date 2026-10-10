@@ -42,6 +42,21 @@ this file is the reference.
 effects?), spectrograms (is the energy where the preset intends?) and the numbers. The user is the
 only judge of how it *sounds*: send them the files early and let them steer.
 
+## Common requests
+
+| The user wants | Command (add `--out <dir>` to deliver) |
+|---|---|
+| the Reaper | `say.py "<text>"` (the defaults) |
+| another voice | `--voice ancient-female` / `young-woman` / `child` / `old-frail` / `vampire-male` / `vampire-female`, with any preset |
+| something other than a machine | a creature: `--preset synthetic-ai`, `ai-choir` (female voices), `wraith --voice old-frail --reverb room`, `hive`, `droid --voice child` |
+| a vampire, a person, no effect | `--voice vampire-female --preset dry --reverb none` |
+| partly machine, partly human | `--blend 0.3` to `0.5` |
+| a scene, several lines, one speaker | the same `--voice` (its seed makes it the same person) and preset on every line; for a custom voice, `--like <first take id>` |
+| audio to animate to | keep the check on: `--out` delivers `_words.json` (word timings) and `.srt`, plus `_voice.wav` (the human layer) |
+| Romanian | `--lang ro` with the same `--voice`; `--ro-voice native` if the user hears an English accent |
+| for WhatsApp or another messenger | `--format mp3` |
+| to hear it now | `--play --no-save`; to talk to the user, the `speak` skill |
+
 ## How a request looks
 
 "Make the Reaper say: *Your extinction is not a tragedy. It is a correction.*"
@@ -54,8 +69,9 @@ only judge of how it *sounds*: send them the files early and let them steer.
 4. **Iterate:** another seed (the base voice varies a lot between seeds), another `--voice` or
    `--instruction`, another preset, `--blend`, or `--fx` to re-run effects on a take without
    regenerating.
-5. **Deliver** the keeper without regenerating it: `say.py --fx <take id> --no-check --out <dir>`
-   (add `--format mp3` for WhatsApp and other messengers: just the MP3). `--out` creates the folder.
+5. **Deliver** the keeper without regenerating it: `say.py --fx <take id> --out <dir>` (keep the
+   check on when the words will be animated or subtitled: it makes `_words.json` and `.srt`; add
+   `--format mp3` for WhatsApp and other messengers: just the MP3). `--out` creates the folder.
    Then send the files (SendUserFile if you have it; otherwise give the paths).
 6. **Report:** paths, take ids and seeds, the instruction used, the words-heard scores, and that the
    server is still holding VRAM (step 5).
@@ -155,13 +171,14 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--bass DB` | Shelve the bass under 150 Hz, -12..6 dB. Use `-6` when a take warns that the words sit low under the bass. Works with `--fx`. |
 | `--trim-tail` / `--no-trim-tail` | Cut stray sound after the last word (an "mmm", a breath) when a take warns about it; the take remembers the cut for later `--fx` renders. Listen first: the warning says voiced (likely an "mmm") or breath. |
 | `--reverb KIND` | `none` (dry: for a take that will get its own room in a mix), `room` (default), `hall`, `cathedral`. |
-| `--default-voice [TAKE]` | Show what Romanian lines clone for `--voice` (default `ancient-male`: the default voice), set it to TAKE (only when the user asks), or `previous` to undo. |
+| `--ro-voice MODE` | Romanian: `clone` (a clone of the voice's English take: its depth, a little English accent), `native` (its native Romanian voice: native accent, higher and smaller) or `auto` (default: each voice's better one). |
+| `--ro-take [TAKE]` | Show which stored take `--voice`'s Romanian lines clone (`--ro-voice native`: its native one), set it to TAKE (only when the user asks), or `previous` to undo. `--default-voice` is the old name. |
 | `--settings` | Show the defaults in effect: the user may have saved their own (`config.local.json`), which every request without that option uses. Check it before assuming the built-in defaults. |
 | `--like TAKE` | Keep an earlier take's voice for a new line: use it for multi-line scenes so every line sounds like the same Reaper. Works across languages: Romanian lines can clone an English take's voice (and the reverse). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, blend, bass, reverb, tail cut) on an earlier take: no new generation, ~1-3 s. Use it to iterate on effects. |
 | `--check` / `--no-check` | Whisper transcribes the dry and processed audio; prints words-heard scores and writes a spectrogram PNG into `output/`. **On by default**; `--no-check` saves ~1 s when you don't need it. |
 | `--out DIR` / `--name STEM` | Copy the take to DIR (created if needed; never overwrites). Works with `--fx` to export an existing take. |
-| `--format F` | With `--out`: `both` (default: processed WAV + MP3, the voice stem WAV and the dry WAV), `wav` (the same without the MP3) or `mp3` (just the processed MP3). **WhatsApp and most messengers reject WAV**: use `mp3` for those. |
+| `--format F` | With `--out`: `all` (default: processed WAV + MP3, the voice stem WAV, the dry WAV, and with the check `_words.json` and `.srt`), `wav` (the same without the MP3) or `mp3` (just the processed MP3). **WhatsApp and most messengers reject WAV**: use `mp3` for those. |
 | `--wait S` | Wait up to S seconds for the server. |
 | `--json` | Only the server's JSON (plus `paths`): parse this rather than the text output. |
 | `--play` | Play the processed take on the user's speakers when it's ready; returns when playback ends. Exit 1 if it couldn't play. |
@@ -215,18 +232,22 @@ lines with `--like`.
 
 ## Romanian
 
-- **Romanian speaks as the chosen voice** (no `--instruction`, no `--like`): it clones a stored
-  take of that voice, made automatically on its first Romanian line and kept in `voices/` (safe
-  from clearing `output/`). `--voice vampire-female --lang ro` speaks Romanian as the female
-  vampire. For most voices that stored take is English: cloning keeps the voice's depth and
-  delivery (OmniVoice's own deepest design lands around 100-130 Hz, too small next to the
-  English takes). For `ancient-male` it's the deep **default voice** (~65 Hz, found by a search
-  the first time, ~30 s once); `--default-voice` shows it and `--default-voice <take>` replaces it.
-- **Accent.** A clone keeps its English take's accent. It's fine for most voices (by ear: the
-  ancient female and both vampires), but clear on `young-woman`, so hers is a **native Romanian**
-  take designed from attributes (`"romanian"` in `server/voices.json`). Whisper can't hear an
-  accent: if the user hears English colouring in a voice's Romanian, offer the same fix (pick
-  attributes and a seed by ear with them; native voices sound higher than the clones).
+- **Romanian speaks as the chosen voice** (no `--instruction`, no `--like`), from a stored take
+  of it, made automatically on its first Romanian line and kept in `voices/` (safe from clearing
+  `output/`). `--voice vampire-female --lang ro` speaks Romanian as the female vampire.
+- **Two kinds, `--ro-voice`:** `clone` clones the voice's English take: its depth and delivery
+  (65 Hz for the Reaper; OmniVoice's own deepest is 100-130 Hz), with a little English accent.
+  `native` uses a native Romanian voice OmniVoice designs for it (`romanian` in
+  `server/voices.json`): a native accent, higher and smaller. `auto`, the default, picks each
+  voice's better one: native for `young-woman` (her clone sounded English), the clone for the
+  rest (by ear: fine for the ancient female and both vampires). Whisper can't hear an accent:
+  if the user hears English colouring, offer `--ro-voice native`; if a native voice sounds too
+  small, `clone`. Only `young-woman`'s native seed was picked by ear: offer to audition seeds
+  for another voice's native one before relying on it.
+- **The stored takes:** `--ro-take` shows a voice's (`--ro-voice native` for its native one);
+  `--ro-take <take>` replaces it (only when the user asks; an English take for the clone, a
+  Romanian one for the native). For `ancient-male` the clone is the deep **default voice**
+  (~65 Hz, found by a search the first time, ~30 s once).
 - **Sentence by sentence, verified:** the server generates Romanian one sentence at a time,
   transcribes each, and regenerates any sentence with missing words (up to 3 tries), because
   OmniVoice otherwise drops words, especially in long inputs. The response's `sentences` lists
