@@ -3,14 +3,13 @@
 The server must be running (start.cmd). Everything stays on 127.0.0.1.
 
     python scripts/say.py "We are the dark."                          # the default: the Reaper (ancient-male, reaper-drone)
-    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4 --out D:/clips
+    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4 --out clips
     python scripts/say.py "Come closer." --voice vampire-female --preset dry --reverb none
     python scripts/say.py "Noi suntem întunericul." --lang ro --voice young-woman
     python scripts/say.py "..." --instruction "A tired old robot, slow and kind." --seed random
     python scripts/say.py "..." --like 20260101-120000-ab12           # the voice of an earlier take
     python scripts/say.py --fx 20260101-120000-ab12 --preset wraith --reverb room   # new effects, same take
     python scripts/say.py --voices                                    # also --presets, --settings
-    python scripts/say.py --unload                                    # free the GPU, keep the server
 
 With the check (on by default) Whisper transcribes the take: a words-heard score says whether
 the effects buried the speech, and --out also delivers word timings (_words.json) and subtitles
@@ -116,9 +115,6 @@ def given(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
-RELOAD = "~20 s, or ~1 min if the fast paths were never compiled"
-
-
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("text", nargs="?", help="what to say ((sigh)-style vocal events allowed in English)")
@@ -184,9 +180,6 @@ def build_parser() -> argparse.ArgumentParser:
     manage.add_argument("--ro-take", "--default-voice", dest="ro_take", nargs="?", const="", metavar="TAKE",
                         help="show which stored take --voice's Romanian lines clone (the kind they use now; "
                         "--ro-voice clone or native for a specific one), set it to TAKE, or 'previous' to undo")
-    manage.add_argument("--unload", action="store_true", help="free the GPU: the server drops its models but keeps "
-                        f"running and reloads them on the next request ({RELOAD}); it also does this by itself "
-                        "after 15 idle minutes")
     manage.add_argument("--wait", type=float, default=5, help="seconds to wait for the server to come up (180 "
                         "after starting it)")
     return ap
@@ -217,18 +210,12 @@ def main() -> int:
 
     if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
         ap.error("--seed takes a number or 'random'")
-    if not (args.text or args.fx or args.presets or args.ro_take is not None or args.settings or args.unload
-            or args.voices):
-        ap.error("give the text to say, or --fx TAKE, --voices, --presets, --settings, --ro-take or --unload")
+    if not (args.text or args.fx or args.presets or args.ro_take is not None or args.settings or args.voices):
+        ap.error("give the text to say, or --fx TAKE, --voices, --presets, --settings or --ro-take")
     if not wait_for_server(args.wait):
         print(f"No server at {SERVER}. Start it with start.cmd (or start.cmd --no-browser).")
         return 1
 
-    if args.unload:
-        r = call("/api/unload", {})
-        print(f"unloaded {', '.join(r['unloaded']) or 'nothing (already in standby)'}; "
-              f"the server now holds {r['server_reserved_gb']} GB")
-        return 0
     if args.presets:
         for k, v in call("/api/presets").items():
             print(f"{k}\n  {v['description']}\n")

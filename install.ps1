@@ -16,6 +16,11 @@
 .PARAMETER PythonVersion
     Python version to build the venv from, passed to the 'py' launcher.
 
+.PARAMETER AcceptModelLicenses
+    Accept the model weights' licences (Breeze TTS 2 and OmniVoice are research and
+    non-commercial only, including the audio you make with them; Whisper is MIT).
+    Required to download them; without it the installer lists them and stops.
+
 .PARAMETER ReuseModels
     The models\ folder of another local-voice install. Its weights are hard-linked
     (or copied, across drives) instead of downloaded, then checksum-verified.
@@ -25,18 +30,19 @@
     (Blackwell, sm_120) cards.
 
 .EXAMPLE
-    .\install.ps1
+    .\install.ps1 -AcceptModelLicenses
 
 .EXAMPLE
     .\install.ps1 -SkipModels
 
 .EXAMPLE
-    .\install.ps1 -ReuseModels D:\old\local-voice\models
+    .\install.ps1 -AcceptModelLicenses -ReuseModels <another install>\models
 #>
 [CmdletBinding()]
 param(
     [string] $PythonVersion = '3.13',
     [string] $CudaIndex     = 'cu128',
+    [switch] $AcceptModelLicenses,
     [switch] $SkipModels,
     [string] $ReuseModels   = '',
     [switch] $NoPipCache
@@ -81,6 +87,27 @@ $venv   = Join-Path $RepoRoot '.venv'
 $venvPy = Join-Path $venv 'Scripts\python.exe'
 $roVenv = Join-Path $RepoRoot '.venv-ro'
 $roPy   = Join-Path $roVenv 'Scripts\python.exe'
+
+# --- licences: before anything heavy ----------------------------------------
+if (-not $SkipModels -and -not $AcceptModelLicenses) {
+    Write-Host @"
+
+  local-voice downloads three models. Read their licences first:
+
+    Breeze TTS 2   research and non-commercial use only, including the audio you make
+                   (BreezeBlue Research and Non-Commercial License)
+                   https://huggingface.co/BreezeBlue/Breeze-TTS-2
+    OmniVoice      non-commercial (CC-BY-NC), including the audio you make; credit k2-fsa
+                   https://huggingface.co/k2-fsa/OmniVoice
+    Whisper        MIT (large-v3-turbo, used to check takes)
+                   https://huggingface.co/openai/whisper-large-v3-turbo
+
+  This repo's own code is MIT; see LICENSE-MODELS.md. To accept the model licences and
+  install, re-run with -AcceptModelLicenses (or -SkipModels to set up without weights).
+
+"@ -ForegroundColor Yellow
+    exit 1
+}
 
 # --- prerequisites --------------------------------------------------------
 Step 'Checking prerequisites'
@@ -221,11 +248,11 @@ Ok "OmniVoice ready (torch $omniLast)"
 # --- weights --------------------------------------------------------------
 if ($SkipModels) {
     Step 'Skipping model download (-SkipModels)'
-    Note "Fetch them later with:  & `"$venvPy`" scripts\download_models.py"
+    Note "Fetch them later with:  & `"$venvPy`" scripts\download_models.py --accept-licenses"
 } else {
     Step 'Model weights (~12.6 GB, checksum-verified)'
     Note 'Resumable - if this is interrupted, just re-run install.ps1.'
-    $dlArgs = @((Join-Path $RepoRoot 'scripts\download_models.py'))
+    $dlArgs = @((Join-Path $RepoRoot 'scripts\download_models.py'), '--accept-licenses')
     if ($ReuseModels) {
         if (-not (Test-Path $ReuseModels)) { Fail "-ReuseModels: $ReuseModels does not exist" }
         $dlArgs += @('--reuse', (Resolve-Path $ReuseModels).Path)
@@ -241,7 +268,7 @@ Write-Host @"
   Start it with:      .\start.cmd
   Then open:          http://127.0.0.1:8190/
 
-  Breeze TTS 2 weights and everything you generate with them are for
+  Breeze TTS 2 and OmniVoice, and everything you generate with them, are for
   research and non-commercial use only. See LICENSE-MODELS.md.
 
 "@ -ForegroundColor Green

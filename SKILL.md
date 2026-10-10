@@ -77,8 +77,8 @@ only judge of how it *sounds*: send them the files early and let them steer.
    server is still holding VRAM (step 5).
 
 **When to ask the user:**
-- Before stopping the local-agent model server (`llama-server.exe`) or the local-image ComfyUI
-  server: they may be in use.
+- Before stopping another program that holds the GPU (another model server, an image
+  generator, a game): it may be in use.
 - Whether a take sounds right: you can't tell. Offer concrete knobs ("more metal", "slower",
   "a steadier pitch", "deeper") rather than asking open-endedly.
 - Before writing audio into their project, if they didn't say where it goes.
@@ -103,13 +103,13 @@ only judge of how it *sounds*: send them the files early and let them steer.
 ```bash
 curl -s http://127.0.0.1:8190/api/health      # JSON means the server is up
 nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader
-tasklist | grep -i -E "llama-server|python"
+nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader   # who holds the GPU
 ```
 
-**The 16 GB card holds one model stack at a time.** This server needs ~8.4 GB for English,
-~10 GB with Whisper, and ~12.6 GB once Romanian has been used (the OmniVoice worker adds ~2.7 GB). The local-agent server (`llama-server.exe`, ~11-12 GB) and the local-image ComfyUI
-server (~15.5 GB) can't run alongside it. If one is up, **ask the user** before stopping it with
-that skill's own `stop.cmd`.
+**A 16 GB card holds one model stack at a time.** This server needs ~8.4 GB for English,
+~10 GB with Whisper, and ~12.6 GB once Romanian has been used (the OmniVoice worker adds ~2.7 GB).
+If another program holds most of the GPU (a local LLM server, an image generator), they won't fit
+together: **ask the user** before stopping it, and stop it the way it's meant to be stopped.
 
 **Start the server in its own window:**
 
@@ -182,7 +182,6 @@ take, `--no-check` (API: `"check": false`) to skip the check.
 | `--wait S` | Wait up to S seconds for the server. |
 | `--json` | Only the server's JSON (plus `paths`): parse this rather than the text output. |
 | `--play` | Play the processed take on the user's speakers when it's ready; returns when playback ends. Exit 1 if it couldn't play. |
-| `--unload` | Free the GPU now; the server stays up and reloads on the next request (it also does this after 15 idle minutes). |
 | `--no-save` | Delete what this call made from `output/` when done (after `--play` and/or `--out`): the whole new take, or with `--fx` only that preview's files (the take is kept). For speech that's only meant to be heard. |
 
 **Presets.** "The Reaper voice" means the default, `reaper-drone`; offer the others as variations.
@@ -299,11 +298,9 @@ lines with `--like`.
 
 ## 5. When you're done
 
-The server keeps the model in VRAM: that's what makes the next take fast, but it blocks the
-local-agent and local-image servers. **Leave it running and tell the user** it's up: after 15
-idle minutes it unloads its models by itself (standby, ~0.2 GB) and reloads them on the next
-request (~20 s). To free the GPU right away without stopping it:
-`python ~/.claude/skills/local-voice/scripts/say.py --unload`. Stop it when they're done:
+The server keeps the model in VRAM: that's what makes the next take fast, but it blocks other
+GPU-heavy programs. **Leave it running and tell the user** it's up, and that closing its window
+(or `stop.cmd`) frees the GPU. Stop it when they're done:
 
 ```bash
 cmd //c "$(cygpath -w ~/.claude/skills/local-voice/stop.cmd)"

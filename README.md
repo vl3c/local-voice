@@ -10,9 +10,15 @@ turns the voice into a machine with a vocoder-based sound-design chain. No accou
 text and audio never leave the machine.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1   # ~23 GB: weights + two PyTorch venvs
-.\start.cmd                                              # opens http://127.0.0.1:8190/
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -AcceptModelLicenses   # ~23 GB: weights + two venvs
+.\start.cmd                                                                  # opens http://127.0.0.1:8190/
 ```
+
+> **Licences, plainly.** This repo's code is MIT. The voice models it downloads are not:
+> **Breeze TTS 2 and OmniVoice are for research and non-commercial use only, and so is every
+> piece of audio you make with them.** Don't sell it or use it in a commercial product. Whisper
+> (used to check takes) is MIT. `-AcceptModelLicenses` says you've read
+> [LICENSE-MODELS.md](LICENSE-MODELS.md). Windows and an NVIDIA GPU are required.
 
 ## For AI agents (Claude Code skills)
 
@@ -195,15 +201,17 @@ second or two with no regeneration. Name scratch presets `_something.json` and g
 | OS | Windows 10 / 11 |
 | GPU | NVIDIA, 16 GB VRAM for everything at once (Breeze + fast paths ~8.4 GB, Whisper ~1.5 GB, OmniVoice ~2.7 GB: ~12.6 GB). English only fits in 12 GB. RTX 50-series supported (CUDA 12.8 wheels) |
 | Disk | ~23 GB (weights 12.6 GB, two venvs ~10 GB) plus pip cache |
+| Driver | NVIDIA driver 570 or newer (for the CUDA 12.8 PyTorch wheels; `-CudaIndex cu130` needs a newer one) |
 | Software | Python 3.10+ (3.13 by default, via the `py` launcher), Git |
 
 ## Install
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -AcceptModelLicenses
 ```
 
-It clones the Breeze TTS 2 inference code at a pinned commit into `engine\`, builds `.venv\` with
+`-AcceptModelLicenses` accepts the model licences above (without it, the installer lists them
+and stops before doing anything). It clones the Breeze TTS 2 inference code at a pinned commit into `engine\`, builds `.venv\` with
 PyTorch 2.9.1 + CUDA 12.8, installs `triton-windows` for the fast path, builds `.venv-ro\` for
 OmniVoice (pinned commit, `requirements-ro.txt`), and downloads the weights into `models\`. Re-running is safe: finished steps are skipped and downloads resume.
 
@@ -216,10 +224,10 @@ a SHA256, so an upstream re-upload fails loudly instead of silently changing wha
 | [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) | 3.3 GB | Romanian TTS (24 kHz), voice design by attributes, cloning | CC-BY-NC |
 | [Whisper large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo) | 1.6 GB | transcribes takes (English and Romanian) to check intelligibility | MIT |
 
-Options: `-SkipModels`, `-ReuseModels <other install>\models` (hard-link existing weights instead of downloading), `-PythonVersion 3.12`, `-CudaIndex cu130`, `-NoPipCache`.
+Options: `-SkipModels` (set up without weights; no licence needed), `-ReuseModels <other install>\models` (hard-link existing weights instead of downloading), `-PythonVersion 3.12`, `-CudaIndex cu130`, `-NoPipCache`.
 
 Verify the weights at any time without downloading anything:
-`.venv\Scripts\python.exe scripts\download_models.py --verify`
+`.venv\Scripts\python.exe scripts\download_models.py --verify` (fetching them needs `--accept-licenses`)
 
 ## Using it
 
@@ -227,17 +235,12 @@ Verify the weights at any time without downloading anything:
 opens the page. It always runs in its own console window titled "local-voice server - close this
 window to stop it", and `start.cmd` returns at once, so a server is never running out of sight;
 closing the window stops it and frees the GPU. `start.cmd --no-browser` does the same without
-opening the page (that's how agents start it); `start.cmd --here` runs it in the current console
-instead, for scripts that manage the process themselves. A second start
+opening the page (that's how agents start it). The server only runs in that window: started any
+other way (`python serverpp.py`, a hidden background shell) it refuses, so it can never be left
+holding the GPU out of sight. A second start
 while one is running exits at once ("port in use") instead of loading another copy. Close the
 console window, or run `.\stop.cmd`, to free the VRAM: it stops the server recorded in
 `output\.server.pid` and its Romanian worker, however it was started.
-
-**Standby.** After 15 minutes with no takes the server unloads its models by itself and keeps
-running with almost nothing on the GPU (~0.2 GB), so another tool can have the card; the next
-request loads them again (~20 s once the fast paths have been compiled before, ~1 min the
-first time). `say.py --unload` (API: `POST /api/unload`) does it at once. Change the wait with
-`server\app.py --idle-unload MIN` (0 = never).
 
 ### Command line (what agents use)
 
@@ -287,7 +290,6 @@ python scripts\say.py --presets
 | `--wait S` | Wait up to S seconds for the server (startup takes ~60 s). |
 | `--json` | Print only the server's JSON response, plus `paths` (the delivered files). |
 | `--play` | Play the processed take on this machine's speakers; returns when playback ends (exit 1 if it couldn't play). |
-| `--unload` | Free the GPU now: the server drops its models but keeps running (it also does this after 15 idle minutes). |
 | `--no-save` | Delete what this call made from `output\` when done (after `--play` and/or `--out`): the new take, or with `--fx` only that preview's files. For speech meant only to be heard; the `speak` skill uses it. |
 
 Exit codes: 0 done, 1 no server / lost the server / server error, 2 bad arguments.
@@ -314,8 +316,7 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names and descriptions |
 | `GET /api/voices` | | the built-in voices: `name`, `instruction`, `seed`, `about`, `romanian` (the catalog's `use`, `attributes`, `seed`) and `romanian_takes` (the stored `clone` and `native` takes, or null) |
-| `GET /api/health` | | which models are loaded, `standby`, idle seconds, VRAM |
-| `POST /api/unload` | | free the GPU: drop every model, keep running (standby) |
+| `GET /api/health` | | which models are loaded, VRAM |
 | `GET` / `POST /api/default-voice` | `{"id", "voice"?, "kind"?}` to set (`?voice=&kind=` to read) | the stored take a voice's Romanian lines clone (`kind`: `clone`, `native`, or `auto`, the default: the kind they use now): source take id, text, median pitch, `previous` |
 | `POST /api/default-voice/restore-previous` | `{"voice"?, "kind"?}` | swap back to the previous one |
 | `GET` / `POST` / `DELETE /api/settings` | the settings to save | `effective`, `saved`, `repo` defaults; save / reset `config.local.json` |

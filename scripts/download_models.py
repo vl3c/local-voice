@@ -129,9 +129,27 @@ def main() -> int:
     ap.add_argument("--root", default=str(REPO), help="folder that models/ lives in")
     ap.add_argument("--only", action="append", help="just this repo name (repeatable)")
     ap.add_argument("--verify", action="store_true", help="verify existing files, download nothing")
+    ap.add_argument("--accept-licenses", action="store_true",
+                    help="accept the weights' licences (Breeze TTS 2 and OmniVoice: research and non-commercial only, "
+                    "including their output; Whisper: MIT). Needed to fetch or link them; not for --verify")
     ap.add_argument("--reuse", metavar="MODELS_DIR",
                     help="another install's models/ folder: hard-link matching files instead of downloading")
     args = ap.parse_args()
+
+    if not args.verify and not args.accept_licenses:
+        print("""The weights come under their own licences; read them first:
+
+    Breeze TTS 2   research and non-commercial use only, including the audio you make
+                   (BreezeBlue Research and Non-Commercial License)
+                   https://huggingface.co/BreezeBlue/Breeze-TTS-2
+    OmniVoice      non-commercial (CC-BY-NC), including the audio you make; credit k2-fsa
+                   https://huggingface.co/k2-fsa/OmniVoice
+    Whisper        MIT (large-v3-turbo, used to check takes)
+                   https://huggingface.co/openai/whisper-large-v3-turbo
+
+Re-run with --accept-licenses to accept them and download (install.ps1 -AcceptModelLicenses
+does this for you). --verify checks existing files without it.""")
+        return 1
 
     spec = json.loads((REPO / "models.json").read_text(encoding="utf-8"))
     root = Path(args.root).resolve()

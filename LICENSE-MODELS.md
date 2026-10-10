@@ -15,10 +15,17 @@ from their upstream sources, and they stay under their own licences.
 | Pedalboard | [spotify/pedalboard](https://github.com/spotify/pedalboard) | GPL-3.0 | Installed into the venv as a library; not redistributed. |
 | Parselmouth / Praat | [YannickJadoul/Parselmouth](https://github.com/YannickJadoul/Parselmouth) | GPL-3.0 | Same. |
 
-The effects presets in `voicefx/presets/` are original. Their starting points
-came from published sound-design research: the Designed Vocalizations Dataset's
-preset chains (NCSOFT, CC-BY-4.0) and the VoiceDesigner paper's character
-augmentation chains (arXiv 2608.13613).
+This repo distributes only its own MIT code: install.ps1 fetches every library and model from its
+upstream. If you redistribute a bundle that includes Pedalboard or Parselmouth (a packaged build,
+an installer with the venv inside), the GPL-3.0 applies to that bundle.
+
+The effects presets in `voicefx/presets/` are original. Their starting points came from
+published sound-design research, used as ideas only (no audio or data from either is included):
+the [Designed Vocalizations Dataset](https://arxiv.org/abs/2607.20951) (NC AI / NCSOFT,
+Interspeech 2026; [project page](https://ncai-official.github.io/speech/publications/designed-vocalizations-dataset/))
+and its preset chains, and [VoiceDesigner](https://arxiv.org/abs/2608.13613)'s character
+augmentation chains. The `ai-choir` creature's spectrum and layering were measured, by ear and
+by analysis, from a short game clip kept locally and never included.
 
 Mass Effect and the Reapers belong to Electronic Arts / BioWare. The presets
 imitate a style of sound processing; they contain no audio from the games.

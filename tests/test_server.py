@@ -1,5 +1,5 @@
 r"""The server with fake models: endpoints, the check, word timings, warnings, tail cuts,
-Romanian generation and voices, standby. No GPU and no weights needed.
+Romanian generation and voices. No GPU and no weights needed.
 
     .venv\Scripts\python.exe -m pytest tests -q
 """
@@ -93,9 +93,9 @@ def speak(app, **body):
 
 # ------------------------------------------------------------------ endpoints
 
-def test_health_reports_models_and_standby(server):
+def test_health_reports_models_and_vram(server):
     h = client(server).get("/api/health").json()
-    assert h["ok"] and "standby" in h and "idle_s" in h and "vram_used_gb" in h
+    assert h["ok"] and "tts_loaded" in h and "vram_used_gb" in h and "standby" not in h
 
 
 def test_presets_and_voices_listings(server):
@@ -315,33 +315,6 @@ def test_default_voice_endpoints_per_voice_and_kind(server):
     assert c.post("/api/default-voice/restore-previous", json={"voice": "old-frail"}).status_code == 404
 
 
-# ------------------------------------------------------------------ standby
-
-def test_unload_drops_the_models(server, monkeypatch):
-    monkeypatch.setattr(server, "_tts", object())
-    monkeypatch.setattr(server, "_asr", object())
-    r = client(server).post("/api/unload").json()
-    assert set(r["unloaded"]) == {"tts", "whisper"} and server._tts is None and server._asr is None
-    assert client(server).post("/api/unload").json()["unloaded"] == []
-
-
-def test_standby_waits_for_idle_and_for_a_free_lock(server, monkeypatch):
-    monkeypatch.setattr(server, "_tts", object())
-    server._touch()
-    assert not server._standby_tick(1)                   # used just now
-    monkeypatch.setattr(server, "_last_used", time.monotonic() - 120)
-    with server._lock:
-        assert not server._standby_tick(1)               # a take is in progress
-    assert server._standby_tick(1) and server._tts is None
-    assert not server._standby_tick(1)                   # nothing left to unload
-
-
-def test_a_take_resets_the_idle_clock(server, monkeypatch):
-    monkeypatch.setattr(server, "_last_used", time.monotonic() - 999)
-    speak(server, text="Hello.")
-    assert time.monotonic() - server._last_used < 5
-
-
 def fake_native(server, monkeypatch):
     def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
         sf.write(out, voice_like(f0=200), SR)
@@ -403,3 +376,20 @@ def test_the_api_resolves_auto_to_the_kind_romanian_lines_use(server):
     assert back["id"] == first and back["kind"] == "native"
     r = c.post("/api/default-voice", json={"id": first, "voice": "child"}).json()          # auto for child: clone
     assert r["kind"] == "clone" and (server.VOICES / "child.wav").is_file()
+
+
+def test_the_server_refuses_to_start_outside_its_window(monkeypatch):
+    import app
+    monkeypatch.delenv(app.WINDOW_MARK, raising=False)
+    monkeypatch.setattr(sys, "argv", ["app.py"])
+    with pytest.raises(SystemExit) as e:
+        app.main()
+    assert "start.cmd" in str(e.value)
+
+
+def test_start_cmd_marks_only_the_window_it_opens():
+    import app
+    cmd = (Path(app.REPO) / "start.cmd").read_text(encoding="utf-8")
+    assert f'set "{app.WINDOW_MARK}=1"' in cmd and "--here" not in cmd
+    mark, launch = cmd.index(f'set "{app.WINDOW_MARK}=1"'), cmd.index('start "local-voice server')
+    assert mark < launch  # set just before the new console is opened, which inherits it
