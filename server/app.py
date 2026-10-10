@@ -1102,16 +1102,24 @@ def _touch() -> None:
 
 
 def _standby_watch(minutes: float) -> None:
-    """Unload the models once nothing has used them for `minutes` (checked every 30 s).
-    A take in progress holds _lock, so standby never interrupts one."""
+    """Unload the models once nothing has used them for `minutes` (checked every 30 s)."""
     while True:
         time.sleep(30)
-        if _loaded() and time.monotonic() - _last_used >= minutes * 60 and _lock.acquire(blocking=False):
-            try:
-                if time.monotonic() - _last_used >= minutes * 60:  # nothing slipped in meanwhile
-                    unload_models(f"idle {minutes:g} min")
-            finally:
-                _lock.release()
+        _standby_tick(minutes)
+
+
+def _standby_tick(minutes: float) -> bool:
+    """One standby check: unload if something is loaded and idle for `minutes`. A take in
+    progress holds _lock, so standby never interrupts one (it tries again next time)."""
+    if not (_loaded() and time.monotonic() - _last_used >= minutes * 60 and _lock.acquire(blocking=False)):
+        return False
+    try:
+        if time.monotonic() - _last_used < minutes * 60:  # a take slipped in meanwhile
+            return False
+        unload_models(f"idle {minutes:g} min")
+        return True
+    finally:
+        _lock.release()
 
 
 @app.get("/api/presets")
