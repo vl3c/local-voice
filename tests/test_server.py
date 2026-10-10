@@ -95,7 +95,18 @@ def speak(app, **body):
 
 def test_health_reports_models_and_vram(server):
     h = client(server).get("/api/health").json()
-    assert h["ok"] and "tts_loaded" in h and "vram_used_gb" in h and "standby" not in h
+    assert h["ok"] and "tts_loaded" in h and "vram_used_gb" in h and h["busy"] is False and "standby" not in h
+
+
+def test_health_is_busy_while_a_take_holds_the_lock(server):
+    with server._lock:
+        assert client(server).get("/api/health").json()["busy"] is True
+
+
+def test_vram_is_read_from_nvidia_smi_for_the_whole_card(server, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="9216, 16384\n"))
+    assert server.gpu_memory() == (9.0, 16.0)
 
 
 def test_presets_and_voices_listings(server):

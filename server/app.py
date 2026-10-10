@@ -1087,15 +1087,30 @@ class FxReq(BaseModel):
     check: bool = True
 
 
+def gpu_memory() -> tuple[float, float]:
+    """(used, total) GB on the whole card. nvidia-smi sees every process, the OmniVoice worker
+    included; torch's mem_get_info on Windows doesn't always."""
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5, check=True).stdout.splitlines()[0]
+        used, total = (float(v) / 1024 for v in out.split(","))
+        return round(used, 2), round(total, 2)
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        import torch
+        free, total = torch.cuda.mem_get_info() if torch.cuda.is_available() else (0, 0)
+        return round((total - free) / 2**30, 2), round(total / 2**30, 2)
+
+
 @app.get("/api/health")
 def health():
     import torch
-    free, total = torch.cuda.mem_get_info() if torch.cuda.is_available() else (0, 0)
+    used, total = gpu_memory()
     worker = _omni
     return {"ok": True, "tts_loaded": _tts is not None, "whisper_loaded": _asr is not None,
-            "omnivoice_loaded": worker is not None and worker.proc.poll() is None,
+            "omnivoice_loaded": worker is not None and worker.proc.poll() is None, "busy": _lock.locked(),
             "server_reserved_gb": round(torch.cuda.memory_reserved() / 2**30, 2) if torch.cuda.is_available() else 0,
-            "vram_used_gb": round((total - free) / 2**30, 2), "vram_total_gb": round(total / 2**30, 2)}
+            "vram_used_gb": used, "vram_total_gb": total}
 
 
 @app.get("/api/presets")
