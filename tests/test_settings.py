@@ -280,11 +280,12 @@ def test_a_voice_with_romanian_attributes_gets_a_native_romanian_take(app, monke
     monkeypatch.setattr(app, "omni_take", fake_omni_take)
     monkeypatch.setattr(app, "tts", lambda: pytest.fail("a native Romanian voice needs no English take"))
     spec = app.voice_catalog()["young-woman"]["romanian"]
-    wav, text, tid = app.default_voice_ref("young-woman")
+    wav, text, tid = app.default_voice_ref("young-woman", "native")
     assert made == [{"language": "ro", "instruct": spec["attributes"], "seed": spec["seed"], "ref": None}]
     assert wav.is_file() and text == app.VOICE_TEXT_RO
-    assert app.default_voice_info("young-woman")["id"] == tid
-    assert app.default_voice_ref("young-woman")[2] == tid  # made once, then reused
+    assert app.default_voice_info("young-woman", "native")["id"] == tid
+    assert app.default_voice_info("young-woman", "clone") == {}  # kept apart from the English clone
+    assert app.default_voice_ref("young-woman", "native")[2] == tid  # made once, then reused
 
 
 def test_a_saved_english_description_never_reaches_romanian(app, monkeypatch):
@@ -299,8 +300,51 @@ def test_a_saved_english_description_never_reaches_romanian(app, monkeypatch):
         return {"spoken_text": text, "sentences": [], "duration_s": 1.0}
 
     monkeypatch.setattr(app, "omni_take", fake_omni_take)
-    monkeypatch.setattr(app, "default_voice_ref", lambda voice: (app.take_paths(ref)["dry"], "We are the dark.", ref))
+    monkeypatch.setattr(app, "default_voice_ref",
+                        lambda voice, kind="clone": (app.take_paths(ref)["dry"], "We are the dark.", ref))
     app.save_settings(app.Settings(instruction="A gravelly old pirate, loud and slurring."))
     r = app.speak(app.SpeakReq(text="Bună ziua.", language="ro", check=False))
     assert calls[-1]["instruct"] is None and calls[-1]["ref"] is not None  # cloned, not designed
     assert r["default_voice"] is True
+
+
+def test_romanian_voice_choice(app):
+    from fastapi import HTTPException
+    assert app.romanian_kind("ancient-male") == "clone"           # auto: the catalog's choice
+    assert app.romanian_kind("young-woman") == "native"           # her clone had an English accent
+    assert app.romanian_kind("young-woman", "clone") == "clone"   # forced either way
+    assert app.romanian_kind("vampire-female", "native") == "native"
+    for v in app.voice_catalog():
+        assert app.romanian_kind(v, "native") == "native"         # every voice has a native one
+    app.VOICE_CATALOG_BACKUP = app.voice_catalog
+    try:
+        app.voice_catalog = lambda: {"x": {"instruction": "A voice.", "seed": 1}}
+        assert app.romanian_kind("x") == "clone"
+        with pytest.raises(HTTPException):
+            app.romanian_kind("x", "native")                       # no attributes: no native voice
+    finally:
+        app.voice_catalog = app.VOICE_CATALOG_BACKUP
+
+
+def test_romanian_requests_use_the_chosen_kind(app, monkeypatch):
+    ref = make_take(app, "20260101-120000-dddd")
+    asked = []
+
+    def fake_ref(voice, kind="clone"):
+        asked.append((voice, kind))
+        return app.take_paths(ref)["dry"], "We are the dark.", ref
+
+    def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
+        sr = 24000
+        sf.write(out, (0.3 * np.sin(2 * np.pi * 120 * np.arange(sr) / sr)).astype(np.float32), sr)
+        return {"spoken_text": text, "sentences": [], "duration_s": 1.0}
+
+    monkeypatch.setattr(app, "default_voice_ref", fake_ref)
+    monkeypatch.setattr(app, "omni_take", fake_omni_take)
+    r = app.speak(app.SpeakReq(text="Bună.", language="ro", voice="young-woman", check=False))
+    assert asked[-1] == ("young-woman", "native") and r["ro_voice"] == "native"
+    r = app.speak(app.SpeakReq(text="Bună.", language="ro", voice="young-woman", ro_voice="clone", check=False))
+    assert asked[-1] == ("young-woman", "clone") and r["ro_voice"] == "clone"
+    app.save_settings(app.Settings(ro_voice="native"))
+    app.speak(app.SpeakReq(text="Bună.", language="ro", voice="vampire-male", check=False))
+    assert asked[-1] == ("vampire-male", "native")                # the saved choice applies
