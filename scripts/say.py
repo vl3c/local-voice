@@ -182,8 +182,8 @@ def build_parser() -> argparse.ArgumentParser:
     manage.add_argument("--settings", action="store_true",
                         help="show the defaults in effect (built-in, or the user's saved config.local.json)")
     manage.add_argument("--ro-take", "--default-voice", dest="ro_take", nargs="?", const="", metavar="TAKE",
-                        help="show which stored take --voice's Romanian lines clone (with --ro-voice native: its "
-                        "native one), set it to TAKE, or 'previous' to undo the last change")
+                        help="show which stored take --voice's Romanian lines clone (the kind they use now; "
+                        "--ro-voice clone or native for a specific one), set it to TAKE, or 'previous' to undo")
     manage.add_argument("--unload", action="store_true", help="free the GPU: the server drops its models but keeps "
                         f"running and reloads them on the next request ({RELOAD}); it also does this by itself "
                         "after 15 idle minutes")
@@ -253,14 +253,14 @@ def main() -> int:
             print(f"  {k:12s} {shown}{mark}")
         return 0
     if args.ro_take is not None:
-        voice, kind = args.voice or "ancient-male", "native" if args.ro_voice == "native" else "clone"
+        voice, kind = args.voice or "ancient-male", args.ro_voice or "auto"  # auto: what its Romanian lines use
         if args.ro_take.lower() == "previous":
             h = call("/api/default-voice/restore-previous", {"voice": voice, "kind": kind})
         elif args.ro_take:
             h = call("/api/default-voice", {"id": args.ro_take, "voice": voice, "kind": kind})
         else:
             h = call(f"/api/default-voice?voice={voice}&kind={kind}")
-        what = "its native Romanian voice" if kind == "native" else "a clone of its English take"
+        what = "its native Romanian voice" if h.get("kind") == "native" else "a clone of its English take"
         if not h.get("id"):
             print(f"{voice} in Romanian, as {what}: none stored yet; the first Romanian line makes it")
         else:
@@ -291,8 +291,8 @@ def main() -> int:
             elif res.get("instruction"):
                 print(f"voice: {res['instruction']}")
             elif res.get("default_voice"):
-                how = "native Romanian" if res.get("ro_voice") == "native" else "cloned from English"
-                print(f"voice: {res.get('voice') or 'default voice'}, {how} (take {res['like']})")
+                how = {"native": ", native Romanian", "clone": ", cloned from English"}.get(res.get("ro_voice"), "")
+                print(f"voice: {res.get('voice') or 'default voice'}{how} (take {res['like']})")
             elif res.get("like"):
                 print(f"voice: cloned from take {res['like']}")
         keys = ("duration_s", "fx_s") if args.fx else ("duration_s", "gen_s", "fx_s")

@@ -135,9 +135,11 @@ def test_ro_take_shows_sets_and_undoes_per_kind(fake_server, monkeypatch, capsys
     run(monkeypatch, capsys, "--ro-take", "--voice", "child", "--ro-voice", "native")
     assert calls[-1][0] == "/api/default-voice?voice=child&kind=native"
     run(monkeypatch, capsys, "--ro-take", "T9", "--voice", "child")
-    assert calls[-1][:2] == ("/api/default-voice", {"id": "T9", "voice": "child", "kind": "clone"})
+    assert calls[-1][:2] == ("/api/default-voice", {"id": "T9", "voice": "child", "kind": "auto"})
+    run(monkeypatch, capsys, "--default-voice", "T9", "--voice", "young-woman")  # the old name, the old usage
+    assert calls[-1][:2] == ("/api/default-voice", {"id": "T9", "voice": "young-woman", "kind": "auto"})
     status, out = run(monkeypatch, capsys, "--ro-take", "previous")
-    assert calls[-1][:2] == ("/api/default-voice/restore-previous", {"voice": "ancient-male", "kind": "clone"})
+    assert calls[-1][:2] == ("/api/default-voice/restore-previous", {"voice": "ancient-male", "kind": "auto"})
     assert "take T9" in out and "--ro-take previous" in out
 
 

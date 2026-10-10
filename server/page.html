@@ -292,32 +292,36 @@ function syncVoiceHint() {
     : `Empty = ${who}, as ${kind}: made automatically on the first Romanian line.`;
 }
 
-async function setDefaultVoice(res, undo = false) {
+async function setDefaultVoice(res) {
   // An English take becomes the voice's clone source; a Romanian one, its native voice.
+  // The Romanian voice setting itself is left alone: it decides which of the two is used.
   const id = res.id, kind = res.language === "ro" ? "native" : "clone";
   const voice = chosenVoice() || "ancient-male", name = voices[voice]?.name || voice;
-  if (roKind() !== kind) { $("roVoice").value = kind; }
-  await loadDefaultVoice();
-  if (defaultVoice && defaultVoice.id === id) { $("status").textContent = `Take ${id} already is the Romanian ${name}.`; return; }
-  const was = defaultVoice ? `take ${defaultVoice.id} (${defaultVoice.f0_hz} Hz)` : "none yet";
-  if (!undo && !confirm(`Make take ${id} the Romanian "${name}" voice?\n\nRomanian lines with the ${name} voice that leave the ` +
-      `voice attributes empty, from this page and from agents, will clone this take from now on.\n\nCurrent: ${was}. ` +
+  const label = kind === "native" ? "native Romanian voice" : "Romanian clone (from English)";
+  let cur = null;
+  try { const h = await api(`/api/default-voice?voice=${encodeURIComponent(voice)}&kind=${kind}`); cur = h.id ? h : null; } catch (e) {}
+  if (cur && cur.id === id) { $("status").textContent = `Take ${id} already is the ${name}'s ${label}.`; return; }
+  const used = roKind() === kind ? "Romanian lines with this voice use it now"
+    : `it is used when the Romanian voice setting picks the ${kind === "native" ? "native voice" : "clone"} (now it picks the other)`;
+  if (!confirm(`Make take ${id} the ${name}'s ${label}?\n\n${used[0].toUpperCase() + used.slice(1)}, from this page and from ` +
+      `agents, when the voice attributes are left empty.\n\nCurrent: ${cur ? `take ${cur.id} (${cur.f0_hz} Hz)` : "none yet"}. ` +
       `It is remembered, so you can switch back.`)) return;
   try {
-    const prev = defaultVoice;
-    defaultVoice = await api("/api/default-voice", {id, voice, kind});
+    const set = await api("/api/default-voice", {id, voice, kind});
+    if (roKind() === kind) defaultVoice = set;
     syncVoiceHint();
-    $("status").textContent = `Romanian ${name} is now take ${id} (${defaultVoice.f0_hz} Hz). `;
-    if (prev && !undo) $("status").append(el("button", {class: "undo", onclick: restorePreviousVoice,
-      tip: `Switch back to take ${prev.id}.`}, "Undo"));
+    $("status").textContent = `The ${name}'s ${label} is now take ${id} (${set.f0_hz} Hz). `;
+    if (cur) $("status").append(el("button", {class: "undo", onclick: () => restorePreviousVoice(voice, kind),
+      tip: `Switch back to take ${cur.id}.`}, "Undo"));
   } catch (e) { $("status").textContent = "Error: " + e.message; }
 }
 
-async function restorePreviousVoice() {
+async function restorePreviousVoice(voice, kind) {
   try {
-    defaultVoice = await api("/api/default-voice/restore-previous", {voice: chosenVoice() || "ancient-male", kind: roKind()});
+    const back = await api("/api/default-voice/restore-previous", {voice, kind});
+    if (roKind() === kind && (chosenVoice() || "ancient-male") === voice) defaultVoice = back;
     syncVoiceHint();
-    $("status").textContent = `Back to take ${defaultVoice.id} (${defaultVoice.f0_hz} Hz).`;
+    $("status").textContent = `Back to take ${back.id} (${back.f0_hz} Hz).`;
   } catch (e) { $("status").textContent = "Error: " + e.message; }
 }
 
@@ -438,7 +442,7 @@ function renderTake(res, autoplay) {
   if (voices[res.voice] && res.language === "en") box.append(el("div", {class: "meta", tip: "The built-in voice: " + voices[res.voice].instruction}, "voice: " + voices[res.voice].name));
   else if (res.instruction) box.append(el("div", {class: "meta", tip: "The voice description used for this take."}, "voice: " + res.instruction));
   else if (res.default_voice) box.append(el("div", {class: "meta", tip: "This Romanian take spoke as a built-in voice: a clone of its stored English take, or its native Romanian voice (the Romanian voice setting)."},
-    "voice: " + (voices[res.voice]?.name || "default voice") + (res.ro_voice === "native" ? ", native Romanian" : ", cloned from English") + " (take " + res.like + ")"));
+    "voice: " + (voices[res.voice]?.name || "default voice") + ({native: ", native Romanian", clone: ", cloned from English"}[res.ro_voice] || "") + " (take " + res.like + ")"));
   else if (res.like) box.append(el("div", {class: "meta", tip: "This take reused the voice of an earlier take."}, "voice of take " + res.like));
 
   const dl = el("span", {class: "dl"},
@@ -488,7 +492,6 @@ function renderTake(res, autoplay) {
     $("voice").value = voices[res.voice] ? res.voice : (res.instruction ? CUSTOM : "ancient-male");
     $("lang").value = ["en", "ro"].includes(lang) ? lang : "en"; syncLanguage();
     $("instruction").value = res.instruction || "";
-    if (res.ro_voice) $("roVoice").value = res.ro_voice;
     if (res.speed) $("speed").value = res.speed;
     $("pitch").value = res.pitch ?? 0; $("tempo").value = res.tempo ?? 1; $("reverb").value = res.reverb || "none";
     $("blend").value = res.blend ?? 0; $("double").value = res.double_ms ?? 0; $("bass").value = res.bass_db ?? 0;

@@ -42,8 +42,7 @@ def keys(src: str) -> set[str]:
     """Object keys written as `key:` plus assignments `body.key =` in a piece of script."""
     src = code_only(src)
     found = set(re.findall(r"[{,\s](\w+):\s", src)) | set(re.findall(r"body\.(\w+)\s*=", src))
-    return found - {"method", "headers", "body", "class", "tip", "onclick", "href", "download", "src", "alt",
-                    "value", "type", "auto", "clone", "native", "room", "hall", "cathedral", "none"}
+    return found - {"method", "headers", "body", "class", "tip", "onclick", "href", "download", "src", "alt"}
 
 
 @pytest.fixture(scope="module")
@@ -81,19 +80,43 @@ def test_the_romanian_voice_calls_use_real_kinds(app):
         assert value in ("auto", *app.RO_KINDS)
 
 
-def test_every_file_link_is_one_the_server_returns():
+@pytest.fixture(scope="module")
+def responses(tmp_path_factory):
+    """What the server really returns: a checked English take, a Romanian take, an effects re-run
+    (fake models, see test_server.py)."""
+    import json as _json
+    import test_server as ts
+    import app as server
+    tmp = tmp_path_factory.mktemp("page")
+    mp = pytest.MonkeyPatch()
+    try:
+        for name, value in (("OUTPUT", tmp / "output"), ("VOICES", tmp / "voices"),
+                            ("SETTINGS_FILE", tmp / "config.local.json")):
+            mp.setattr(server, name, value)
+        (tmp / "output").mkdir()
+        breeze, whisper = ts.FakeBreeze(), ts.FakeWhisper()
+        mp.setattr(server, "tts", lambda: breeze)
+        mp.setattr(server, "asr", lambda: whisper)
+        ts.fake_native(server, mp)
+        server._fakes = (breeze, whisper)
+        en = ts.speak(server, text="We are the dark.", check=True, blend=0.3, double_ms=10, bass_db=-3)
+        ro = ts.speak(server, text="Bună seara.", language="ro", voice="young-woman")
+        fx = ts.client(server).post("/api/fx", json={"id": en["id"], "check": False}).json()
+        return [en, ro, {**_json.loads(server.take_paths(en["id"])["meta"].read_text(encoding="utf-8")), **fx}]
+    finally:
+        mp.undo()
+
+
+def test_every_file_link_is_one_the_server_returns(responses):
     linked = set(re.findall(r"res\.files\.(\w+)", SCRIPT))
-    returned = {"dry", "wet", "mp3", "voice", "spectrogram", "words", "srt"}
+    returned = set().union(*(r["files"] for r in responses))
     assert linked <= returned, linked - returned
 
 
-def test_every_field_shown_from_a_take_exists(app, tmp_path, monkeypatch):
-    """The take card reads res.<field>: each must be something speak or fx returns."""
-    shown = set(re.findall(r"\bres\.(\w+)", SCRIPT)) - {"files"}
-    returned = {"id", "text", "language", "voice", "instruction", "seed", "like", "default_voice", "ro_voice",
-                "model", "speed", "cfg_scale", "sentences", "warnings", "preset", "pitch", "tempo", "reverb",
-                "blend", "double_ms", "bass_db", "trim_end_s", "duration_s", "gen_s", "heard", "match",
-                "asr_unreliable", "check_error", "words", "channels", "speech_lufs", "articulation_boost_db"}
+def test_every_field_shown_from_a_take_exists(responses):
+    """The take card reads res.<field>: each must be something a real speak or fx returns."""
+    shown = set(re.findall(r"res\.(\w+)", SCRIPT)) - {"files"}
+    returned = set().union(*responses)
     assert shown <= returned, shown - returned
 
 

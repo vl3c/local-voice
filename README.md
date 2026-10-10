@@ -313,10 +313,10 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 | `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "voice"?, "ro_voice"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names and descriptions |
-| `GET /api/voices` | | the built-in voices: name, description, seed, and each one's Romanian clone |
+| `GET /api/voices` | | the built-in voices: `name`, `instruction`, `seed`, `about`, `romanian` (the catalog's `use`, `attributes`, `seed`) and `romanian_takes` (the stored `clone` and `native` takes, or null) |
 | `GET /api/health` | | which models are loaded, `standby`, idle seconds, VRAM |
 | `POST /api/unload` | | free the GPU: drop every model, keep running (standby) |
-| `GET` / `POST /api/default-voice` | `{"id", "voice"?, "kind"?}` to set (`?voice=&kind=` to read) | the stored take a voice's Romanian lines clone (`kind` `clone` or `native`): source take id, text, median pitch, `previous` |
+| `GET` / `POST /api/default-voice` | `{"id", "voice"?, "kind"?}` to set (`?voice=&kind=` to read) | the stored take a voice's Romanian lines clone (`kind`: `clone`, `native`, or `auto`, the default: the kind they use now): source take id, text, median pitch, `previous` |
 | `POST /api/default-voice/restore-previous` | `{"voice"?, "kind"?}` | swap back to the previous one |
 | `GET` / `POST` / `DELETE /api/settings` | the settings to save | `effective`, `saved`, `repo` defaults; save / reset `config.local.json` |
 | `DELETE /api/takes/<id>` | | delete every file of one take (what `--no-save` does) |

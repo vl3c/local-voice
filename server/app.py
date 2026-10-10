@@ -770,6 +770,27 @@ def _slots(voice: str, kind: str = "clone") -> tuple[str, str]:
     return ("default", "previous") if voice == DEFAULT_VOICE else (voice, f"{voice}.previous")
 
 
+def _migrate_slots(voice: str) -> None:
+    """Before stored takes had kinds, a voice's native Romanian take (young-woman's) lived in its
+    clone slot, voices/<voice>.*. Move a Romanian take found there (and its previous) to the
+    native slot, once, so it keeps being the native voice and the clone slot is free."""
+    if voice == DEFAULT_VOICE:
+        return
+    for old, new in zip(_slots(voice, "clone"), _slots(voice, "native")):
+        info = _read_slot(old)
+        if info.get("language") == "ro" and not _read_slot(new):
+            for a, b in zip(_slot(old), _slot(new)):
+                a.replace(b)
+
+
+def resolve_kind(voice: str, choice: str = "auto") -> str:
+    """romanian_kind with "auto" meaning what Romanian lines use: the user's saved ro_voice if
+    they chose one, else the voice's own choice."""
+    if choice == "auto":
+        choice = local_settings().get("ro_voice") or "auto"
+    return romanian_kind(voice, choice)
+
+
 def romanian_kind(voice: str, choice: str = "auto") -> str:
     """Which stored take a voice's Romanian lines clone. "auto" is the catalog's choice for the
     voice (romanian.use: the clone, except where its English accent showed); "clone" and
@@ -812,6 +833,7 @@ def default_voice_info(voice: str = DEFAULT_VOICE, kind: str = "clone") -> dict:
     It lives in voices/ as a copy of the take's recording, so clearing output/ never
     loses it. "id" is the take it was copied from, which may since have been deleted.
     """
+    _migrate_slots(voice)
     cur, prev_name = _slots(voice, kind)
     info = _read_slot(cur)
     if info:
@@ -829,6 +851,7 @@ def set_default_voice(tid: str, voice: str = DEFAULT_VOICE, kind: str = "clone")
     """Make take `tid` what `voice`'s Romanian lines clone (as its English or its native take);
     the one it replaces is kept as previous."""
     load_take(tid)
+    _migrate_slots(voice)
     cur_name, prev_name = _slots(voice, kind)
     cur = _read_slot(cur_name)
     if cur and cur.get("id") != tid:
@@ -840,6 +863,7 @@ def set_default_voice(tid: str, voice: str = DEFAULT_VOICE, kind: str = "clone")
 
 def restore_previous_voice(voice: str = DEFAULT_VOICE, kind: str = "clone") -> dict:
     """Swap a voice's stored take with its previous one (an undo that survives a cleared output/)."""
+    _migrate_slots(voice)
     cur_name, prev_name = _slots(voice, kind)
     if not _read_slot(prev_name):
         raise HTTPException(404, "there is no previous voice to go back to")
@@ -1238,39 +1262,40 @@ def speak(req: SpeakReq):
     return {**meta, **res, "gen_s": round(gen_s, 2)}
 
 
-RoKind = Literal["clone", "native"]
-
-
+# "auto" (the default) means the kind Romanian lines with that voice use now (resolve_kind).
 class VoiceReq(BaseModel):
     id: str
     voice: str = DEFAULT_VOICE  # which built-in voice's Romanian lines clone this take
-    kind: RoKind = "clone"      # as its English take, or as its native Romanian one
+    kind: RoVoice = "auto"      # as its English take ("clone"), or as its native Romanian one
 
 
 class VoiceUndoReq(BaseModel):
     voice: str = DEFAULT_VOICE
-    kind: RoKind = "clone"
+    kind: RoVoice = "auto"
 
 
 @app.get("/api/default-voice")
-def get_default_voice(voice: str = DEFAULT_VOICE, kind: RoKind = "clone"):
+def get_default_voice(voice: str = DEFAULT_VOICE, kind: RoVoice = "auto"):
     catalog_voice(voice)
+    kind = resolve_kind(voice, kind)
     return default_voice_info(voice, kind) or {"id": None, "voice": voice, "kind": kind}
 
 
 @app.post("/api/default-voice")
 def put_default_voice(req: VoiceReq):
     catalog_voice(req.voice)
+    kind = resolve_kind(req.voice, req.kind)
     with _lock:
-        return set_default_voice(req.id, req.voice, req.kind)
+        return set_default_voice(req.id, req.voice, kind)
 
 
 @app.post("/api/default-voice/restore-previous")
 def restore_default_voice(req: VoiceUndoReq | None = None):
     req = req or VoiceUndoReq()
     catalog_voice(req.voice)
+    kind = resolve_kind(req.voice, req.kind)
     with _lock:
-        return restore_previous_voice(req.voice, req.kind)
+        return restore_previous_voice(req.voice, kind)
 
 
 @app.get("/api/settings")

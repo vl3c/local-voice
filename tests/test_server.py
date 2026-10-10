@@ -340,3 +340,41 @@ def test_a_take_resets_the_idle_clock(server, monkeypatch):
     monkeypatch.setattr(server, "_last_used", time.monotonic() - 999)
     speak(server, text="Hello.")
     assert time.monotonic() - server._last_used < 5
+
+
+def fake_native(server, monkeypatch):
+    def fake_omni_take(text, language, instruct, seed, speed, out, ref_audio, ref_text):
+        sf.write(out, voice_like(f0=200), SR)
+        return {"spoken_text": text, "sentences": [], "duration_s": 2.0}
+    monkeypatch.setattr(server, "omni_take", fake_omni_take)
+    monkeypatch.setattr(server, "omni", lambda: FakeOmni())
+
+
+def test_romanian_kinds_reach_their_own_stored_takes(server, monkeypatch):
+    fake_native(server, monkeypatch)
+    native = speak(server, text="Bună seara.", language="ro", voice="young-woman")             # auto: native
+    clone = speak(server, text="Bună seara.", language="ro", voice="young-woman", ro_voice="clone")
+    v = server.VOICES
+    assert (v / "young-woman.ro.wav").is_file() and (v / "young-woman.wav").is_file()
+    assert native["like"] == json.loads((v / "young-woman.ro.json").read_text(encoding="utf-8"))["id"]
+    assert clone["like"] == json.loads((v / "young-woman.json").read_text(encoding="utf-8"))["id"]
+    assert server._fakes[0].calls[-1]["text"] == server.VOICE_TEXT  # the clone came from an English take
+
+
+def test_a_native_take_stored_before_kinds_is_moved_not_lost(server, monkeypatch):
+    fake_native(server, monkeypatch)
+    old = make_take(server, "20260101-120000-0001", text="Am așteptat.", language="ro")
+    server.VOICES.mkdir()
+    server._store("young-woman", old)                     # where the old layout kept her native voice
+    assert server.default_voice_info("young-woman", "native")["id"] == old
+    assert server.default_voice_info("young-woman", "clone") == {}
+    res = speak(server, text="Bună.", language="ro", voice="young-woman")
+    assert res["like"] == old and res["ro_voice"] == "native"  # the picked take keeps speaking
+
+
+def test_auto_follows_the_saved_romanian_choice(server):
+    assert server.resolve_kind("young-woman") == "native"
+    server.save_settings(server.Settings(ro_voice="clone"))
+    assert server.resolve_kind("young-woman") == "clone"
+    c = client(server)
+    assert c.get("/api/default-voice?voice=young-woman").json()["kind"] == "clone"
