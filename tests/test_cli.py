@@ -143,13 +143,6 @@ def test_ro_take_shows_sets_and_undoes_per_kind(fake_server, monkeypatch, capsys
     assert "take T9" in out and "--ro-take previous" in out
 
 
-def test_unload_reports_what_was_freed(fake_server, monkeypatch, capsys):
-    _, replies = fake_server
-    replies["/api/unload"] = {"unloaded": ["tts", "whisper"], "server_reserved_gb": 0.16}
-    status, out = run(monkeypatch, capsys, "--unload")
-    assert status == 0 and "unloaded tts, whisper" in out and "0.16 GB" in out
-
-
 def test_a_take_prints_its_summary_and_warnings(fake_server, monkeypatch, capsys, tmp_path):
     _, replies = fake_server
     monkeypatch.setattr(say, "OUTPUT", tmp_path)

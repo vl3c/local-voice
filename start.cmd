@@ -7,8 +7,9 @@ rem                             the page opens in your browser once it's ready
 rem   start.cmd --no-browser    the same without opening the page (what agents use)
 rem   start.cmd --safe          eager mode: no CUDA-graph warmup, ~6x slower, for when the
 rem                             fast-path warmup fails (combines with --no-browser)
-rem   start.cmd --here          run in this console instead, for scripts that manage the
-rem                             process themselves
+rem
+rem The server only ever runs in that window, so it can't be left running out of sight: it
+rem refuses to start anywhere else (a hidden background shell, python serverpp.py).
 setlocal
 cd /d "%~dp0"
 rem Captured before the option loop: it shifts the arguments (shift /1 leaves %0 alone,
@@ -29,31 +30,30 @@ if not exist "%HERE_DIR%.venv\Scripts\python.exe" (
 )
 
 set "BROWSER=1"
-set "HERE="
 set "INWIN="
 set "EXTRA="
 :args
 if "%~1"=="" goto argsdone
 if /i "%~1"=="--no-browser" (set "BROWSER=" & shift /1 & goto args)
 if /i "%~1"=="--safe"       (set "EXTRA=--safe" & shift /1 & goto args)
-if /i "%~1"=="--here"       (set "HERE=1" & shift /1 & goto args)
 if /i "%~1"=="--in-window"  (set "INWIN=1" & shift /1 & goto args)
-echo Unknown option "%~1". Use:  start.cmd [--no-browser] [--safe] [--here]
+echo Unknown option "%~1". Use:  start.cmd [--no-browser] [--safe]
 exit /b 2
 :argsdone
 
-rem By default, relaunch in a new, visible console and return immediately, so the server is
-rem always on screen and closing its window shuts it down (Windows ends every process
-rem attached to a console when the console closes).
-if defined HERE goto run
+rem Relaunch in a new, visible console and return immediately, so the server is always on
+rem screen and closing its window shuts it down (Windows ends every process attached to a
+rem console when the console closes). LOCAL_VOICE_WINDOW is how the server knows it is in
+rem that window: the new console inherits it from here; nothing else sets it.
 if defined INWIN goto run
 set "PASS=%EXTRA%"
 if not defined BROWSER set "PASS=--no-browser %EXTRA%"
+set "LOCAL_VOICE_WINDOW=1"
 start "local-voice server - close this window to stop it" cmd /c ""%SELF%" --in-window %PASS%"
 exit /b 0
 
 :run
-if defined INWIN (
+(
   title local-voice server - close this window to stop it
   echo.
   echo   local-voice server on http://127.0.0.1:8190/
@@ -68,7 +68,7 @@ if defined BROWSER start "" /min cmd /c "for /l %%i in (1,1,150) do (curl.exe -s
 rem The server binds to 127.0.0.1 only (hard-coded in server\app.py).
 "%HERE_DIR%.venv\Scripts\python.exe" "%HERE_DIR%server\app.py" --port 8190 %EXTRA%
 
-if defined INWIN (
+(
   echo.
   echo   The server has stopped ^(exit code %ERRORLEVEL%^). This window closes in 60 seconds;
   echo   press a key to close it now.
