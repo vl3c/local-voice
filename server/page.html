@@ -57,14 +57,19 @@
   .take .dl { font-size: 12px; margin-left: 8px; }
   .take .dl a { color: var(--muted); margin-right: 8px; }
   .take .warn { font-size: 13px; color: var(--warn); margin-top: 6px; }
-  .take .bottom { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 12px; }
   .fxbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px;
            background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; }
   .fxbox .boxlbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-  .fxbox select { width: auto; background: var(--panel); }
-  .fxbox input.small { width: 68px; padding: 6px 8px; background: var(--panel); }
   .fxbox .boxlbl.head { min-width: 58px; }
   .panel .fxbox { margin-top: 12px; }
+  details.tune { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--sunk); }
+  details.tune summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted);
+                         text-transform: uppercase; letter-spacing: .05em; }
+  details.tune summary span { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+  details.tune .row { margin-top: 10px; }
+  details.tune input { background: var(--panel); }
+  .take .actions { margin-top: 12px; gap: 8px; }
+  .take .actions button { font-size: 13px; padding: 6px 12px; }
   #tip { position: fixed; z-index: 10; max-width: 340px; padding: 8px 10px; border-radius: 6px;
          background: var(--tip-bg); color: var(--tip-ink); font-size: 13px; line-height: 1.4;
          pointer-events: none; opacity: 0; transition: opacity .12s; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
@@ -81,56 +86,28 @@
     <textarea id="text" data-tip="The line to speak. English vocal events work inline: (sigh), (laugh), (clears throat). Ctrl+Enter speaks.">Your civilization is a flicker in the dark. We are the dark, and we have always been here.</textarea>
 
     <div class="row">
-      <div data-tip="Which TTS model speaks. English uses Breeze TTS 2, which designs a voice from a free-text description. Romanian uses OmniVoice, which designs from fixed attributes or copies a kept voice.">
+      <div data-tip="Which TTS model speaks. English uses Breeze TTS 2, which builds a voice from a written description. Romanian uses OmniVoice, which speaks as the chosen voice (see Romanian voice) or designs one from fixed attributes.">
         <label for="lang">Language</label>
         <select id="lang">
           <option value="en">English</option>
           <option value="ro">Romanian</option>
         </select>
       </div>
-      <div data-tip="Who speaks: a built-in voice, each a description and a seed picked by ear (choosing one also sets the seed). Independent of the effects: any voice works with any preset. Editing the description below switches this to 'Your own description'. In Romanian, a built-in voice is cloned from a stored English take of it, made automatically the first time.">
+      <div data-tip="Who speaks: a built-in voice, each a description and a seed picked by ear (choosing one also sets the seed under Fine-tuning). Independent of the effects: any voice works with any preset. Editing the description below switches this to 'Your own description'.">
         <label for="voice">Voice</label>
         <select id="voice"></select>
       </div>
       <div data-tip="The sound-design chain applied to the voice. Machines: reaper-drone (one unmoving brass pitch speaks the words), reaper (the same, loosely following intonation), harbinger (a synth chord stepping in semitones), sovereign, demon (organic and monstrous). Creatures: synthetic-ai (a ship's AI), ai-choir (an AI choir, stereo), wraith (a ghost), hive (a crowd as one), droid (a small robot). dry: no effects.">
-        <label for="preset">Effects preset</label>
+        <label for="preset">Effects</label>
         <select id="preset"></select>
       </div>
-      <div data-tip="Blank for a random take. Enter a number to reproduce a take exactly. The base voice varies a lot by seed, so rerolling is the main way to find a good one.">
-        <label for="seed">Seed</label>
-        <input id="seed" value="74525861" placeholder="random">
-      </div>
-      <div id="cfgBox" data-tip="Instruction strength, English only: how strictly the model follows the voice description. The default here is 6 (Breeze's own recommendation is 4): stronger pushes the voice harder towards the description, which suits the machine presets; 1 follows it loosely; much above 6 can sound forced or strained. Range 0.5-10.">
-        <label for="cfg">Strength</label>
-        <input id="cfg" type="number" value="6" min="0.5" max="10" step="0.5">
-      </div>
-      <div id="speedBox" data-tip="Romanian only. The model's own speaking rate, 0.75-1.3 (default 0.9). Below about 0.75 the model starts repeating words, so for slower speech use Tempo instead.">
-        <label for="speed">Speed</label>
-        <input id="speed" type="number" value="0.9" min="0.75" max="1.3" step="0.05">
-      </div>
-      <div data-tip="Semitones, -12 to +12, applied to the finished sound. Negative is lower and bigger: the machine's tone and the size of its throat move down together. -3 to -5 is a good start; -12 is an octave down. Re-run effects to try another value without regenerating.">
-        <label for="pitch">Pitch</label>
-        <input id="pitch" type="number" value="0" min="-12" max="12" step="1">
-      </div>
-      <div data-tip="Space added after everything else. None keeps the voice clean and close (best if you'll add your own room later). Light: a large room. Medium: a concert hall. Heavy: a cathedral, with a long tail.">
+      <div data-tip="Space added after everything else. None keeps the voice clean and close (best if you'll add your own room later). Light: a large room. Medium: a concert hall. Heavy: a cathedral.">
         <label for="reverb">Reverb</label>
         <select id="reverb"><option value="none">None</option><option value="room" selected>Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option></select>
       </div>
-      <div data-tip="Time-stretch, 0.5-1.5: below 1 is slower, without changing pitch. Applied to the voice before the effects, together with the preset's own slow-down. Works in both languages. Re-run effects to try another value without regenerating.">
-        <label for="tempo">Tempo</label>
-        <input id="tempo" type="number" value="1" min="0.5" max="1.5" step="0.05">
-      </div>
-      <div data-tip="Mix the human voice under the machine, 0-1: 0 is all machine, 0.5 half and half (equal loudness), 1 all human. The two are sample-aligned, so they speak as one. Re-run effects to try another value without regenerating.">
-        <label for="blend">Blend</label>
-        <input id="blend" type="number" value="0" min="0" max="1" step="0.05">
-      </div>
-      <div data-tip="With Blend: let the machine trail the human voice by this many milliseconds, 0-60. 10-30 thickens the two into one doubled, textured voice; 0 keeps them exactly together; above ~40 it starts to sound like an echo.">
-        <label for="double">Double (ms)</label>
-        <input id="double" type="number" value="0" min="0" max="60" step="5">
-      </div>
-      <div data-tip="Bass under 150 Hz, -12 to +6 dB: negative is less. When a take warns that the words sit low under the bass, -6 usually clears them up. Applied before loudness matching, so the take stays as loud. Re-run effects to try another value without regenerating.">
-        <label for="bass">Bass (dB)</label>
-        <input id="bass" type="number" value="0" min="-12" max="6" step="1">
+      <div id="roVoiceBox" data-tip="Romanian only: which voice speaks the Romanian. Clone: the chosen voice's own English take, cloned: its depth and delivery, with a little English accent. Native: a Romanian voice designed for it by the Romanian engine (seeded): a native accent, but higher and smaller. Recommended: each voice's better one (native for the young woman, the clone for the rest).">
+        <label for="roVoice">Romanian voice</label>
+        <select id="roVoice"><option value="auto">Recommended</option><option value="clone">Clone (English voice)</option><option value="native">Native (Romanian engine)</option></select>
       </div>
     </div>
     <div id="presetDesc" class="hint"></div>
@@ -138,6 +115,44 @@
     <label for="instruction" id="instructionLbl">Voice and mood</label>
     <textarea id="instruction"></textarea>
     <div id="instructionHint" class="hint"></div>
+
+    <details class="tune" id="tune">
+      <summary data-tip="The finer controls. The heading lists any that differ from their defaults.">Fine-tuning<span id="tuneSummary"></span></summary>
+      <div class="row">
+        <div data-tip="Semitones, -12 to +12, applied to the finished sound. Negative is lower and bigger: the machine's tone and the size of its throat move down together. -3 to -5 is a good start.">
+          <label for="pitch">Pitch</label>
+          <input id="pitch" type="number" value="0" min="-12" max="12" step="1">
+        </div>
+        <div data-tip="Time-stretch, 0.5-1.5: below 1 is slower, without changing pitch. Applied to the voice before the effects.">
+          <label for="tempo">Tempo</label>
+          <input id="tempo" type="number" value="1" min="0.5" max="1.5" step="0.05">
+        </div>
+        <div data-tip="Mix the human voice under the effect, 0-1: 0 is all effect, 0.5 half and half (equal loudness), 1 all human. The two are sample-aligned, so they speak as one.">
+          <label for="blend">Blend</label>
+          <input id="blend" type="number" value="0" min="0" max="1" step="0.05">
+        </div>
+        <div data-tip="Bass under 150 Hz, -12 to +6 dB: negative is less. When a take warns that the words sit low under the bass, -6 usually clears them up.">
+          <label for="bass">Bass (dB)</label>
+          <input id="bass" type="number" value="0" min="-12" max="6" step="1">
+        </div>
+        <div data-tip="Blank for a random voice. A number reproduces a take exactly; choosing a voice sets its own. The base voice varies a lot by seed, so rerolling is the main way to find a good one.">
+          <label for="seed">Seed</label>
+          <input id="seed" value="74525861" placeholder="random">
+        </div>
+        <div id="cfgBox" data-tip="English only: how strictly the model follows the voice description. Default 6 (Breeze recommends 4): stronger pushes the voice harder towards the description; much above 6 can sound forced. Range 0.5-10.">
+          <label for="cfg">Strength</label>
+          <input id="cfg" type="number" value="6" min="0.5" max="10" step="0.5">
+        </div>
+        <div id="speedBox" data-tip="Romanian only: the model's own speaking rate, 0.75-1.3 (default 0.9). Below about 0.75 it starts repeating words, so for slower speech use Tempo.">
+          <label for="speed">Speed</label>
+          <input id="speed" type="number" value="0.9" min="0.75" max="1.3" step="0.05">
+        </div>
+        <div data-tip="With Blend: let the effect trail the human voice by this many milliseconds, 0-60 (default 0, exactly together). 10-30 thickens the two into one doubled voice, which can read as extra reverb.">
+          <label for="double">Double (ms)</label>
+          <input id="double" type="number" value="0" min="0" max="60" step="5">
+        </div>
+      </div>
+    </details>
 
     <div class="checks">
       <label data-tip="After generating, Whisper transcribes both the raw and the processed audio and shows what share of your words it heard (a check that the effects didn't bury the speech), plus a spectrogram. Adds about a second."><input type="checkbox" id="check" checked> Transcribe + spectrogram</label>
@@ -150,8 +165,8 @@
     </div>
     <div class="fxbox" data-tip="Your own default settings, kept on this machine (config.local.json). The page starts with them and agents use them for anything they don't specify.">
       <span class="boxlbl head">My defaults</span>
-      <button id="saveSettings" data-tip="Save the panel's current settings (language, preset, seed, strength, speed, pitch, reverb, tempo, blend, double, bass, the check box and a custom English voice description) as your defaults. The page starts with them, and agents use them for anything they don't specify. Stored on this machine in config.local.json, separate from the built-in defaults, which stay untouched. Asks before saving.">Save as my defaults</button>
-      <button id="resetSettings" data-tip="Forget your saved defaults and go back to the built-in ones (reaper-drone, strength 6, seed 74525861, light room). Asks first. Doesn't touch the default voice.">Reset to built-in</button>
+      <button id="saveSettings" data-tip="Save the panel's current settings (language, voice or your own English description, effects, reverb, Romanian voice, fine-tuning and the check box) as your defaults. The page starts with them, and agents use them for anything they don't specify. Stored on this machine in config.local.json, separate from the built-in defaults, which stay untouched. Asks before saving.">Save as my defaults</button>
+      <button id="resetSettings" data-tip="Forget your saved defaults and go back to the built-in ones (the ancient male voice, reaper-drone, light room). Asks first. Doesn't touch the stored Romanian voices.">Reset to built-in</button>
     </div>
   </div>
 
@@ -233,14 +248,33 @@ const stockDescriptions = () => Object.values(voices).map(v => v.instruction);
 let defaultVoice = null;
 
 const TIP_DESC_EN = "Free-text description the model builds the voice from: size, age, timbre, pitch, pace, emotion, attitude. The machine timbre comes from the preset, but pacing, pauses and emphasis come from here. Deeper and slower works best with the Reaper presets.";
-const TIP_DESC_RO = "Leave empty to clone the default voice: a deep English Reaper voice, so Romanian sounds like the English takes. Or design a voice from fixed attributes, comma-separated, one per group: gender (male, female), age (child, teenager, young adult, middle-aged, elderly), pitch (very low pitch ... very high pitch), style (whisper). Designed Romanian voices are higher and smaller than the default voice. Ignored while 'Clone voice of take' is ticked.";
+const TIP_DESC_RO = "Leave empty to speak as the chosen voice (see Romanian voice). Or design a one-off voice from fixed attributes, comma-separated, one per group: gender (male, female), age (child, teenager, young adult, middle-aged, elderly), pitch (very low pitch ... very high pitch), style (whisper). Ignored while 'Clone voice of take' is ticked.";
+
+// Which stored take this voice's Romanian lines clone, for the Romanian voice setting.
+const roKind = () => ($("roVoice").value !== "auto" ? $("roVoice").value
+  : (voices[chosenVoice() || "ancient-male"]?.romanian?.use || "clone"));
+
+const TUNE = [["pitch", 0, "pitch"], ["tempo", 1, "tempo"], ["blend", 0, "blend"], ["bass", 0, "bass"],
+              ["double", 0, "double"], ["cfg", 6, "strength"], ["speed", 0.9, "speed"]];
+function syncTune() {
+  const parts = TUNE.filter(([id, d]) => !$(id).disabled && $(id).value !== "" && parseFloat($(id).value) !== d)
+    .map(([id, , name]) => `${name} ${$(id).value}`);
+  const v = voices[chosenVoice()];
+  const seed = $("seed").value.trim();
+  if (!seed) parts.push("random seed");
+  else if (!v || String(v.seed) !== seed) parts.push(`seed ${seed}`);
+  $("tuneSummary").textContent = parts.length ? "· " + parts.join(" · ") : "· all at their defaults";
+}
 
 function syncLanguage() {
   const ro = isRo();
   $("cfg").disabled = ro; $("speed").disabled = !ro;
+  $("cfgBox").style.display = ro ? "none" : ""; $("speedBox").style.display = ro ? "" : "none";
+  $("roVoiceBox").style.display = ro ? "" : "none";
+  syncTune();
   $("instructionLbl").textContent = ro ? "Voice attributes (optional)" : "Voice and mood";
   $("instructionLbl").dataset.tip = $("instruction").dataset.tip = ro ? TIP_DESC_RO : TIP_DESC_EN;
-  $("instruction").placeholder = ro ? "empty = the default voice · or e.g. male, elderly, very low pitch" : "";
+  $("instruction").placeholder = ro ? "empty = the chosen voice · or e.g. male, elderly, very low pitch" : "";
   syncVoiceHint();
   // Swap in the right kind of default unless the user wrote their own.
   const cur = $("instruction").value.trim();
@@ -252,39 +286,49 @@ function syncLanguage() {
 function syncVoiceHint() {
   const v = voices[$("voice").value];
   const who = v ? v.name : "the default voice";
+  const kind = roKind() === "native" ? "its native Romanian voice" : "a clone of its English voice";
   $("instructionHint").textContent = !isRo() ? (v ? v.about || "" : "Your own description.") : defaultVoice
-    ? `Empty = clone ${who} (take ${defaultVoice.id}, ${defaultVoice.f0_hz} Hz). Change it with "Set as Romanian voice" on any take.${defaultVoice.previous ? ` (Previous: take ${defaultVoice.previous.id}.)` : ""}`
-    : `Empty = clone ${who}: a stored English take of it, made automatically on the first Romanian line.`;
+    ? `Empty = ${who}, as ${kind} (take ${defaultVoice.id}, ${defaultVoice.f0_hz} Hz). "Set as Romanian voice" on a take replaces it.${defaultVoice.previous ? ` (Previous: take ${defaultVoice.previous.id}.)` : ""}`
+    : `Empty = ${who}, as ${kind}: made automatically on the first Romanian line.`;
 }
 
-async function setDefaultVoice(id, undo = false) {
+async function setDefaultVoice(res) {
+  // An English take becomes the voice's clone source; a Romanian one, its native voice.
+  // The Romanian voice setting itself is left alone: it decides which of the two is used.
+  const id = res.id, kind = res.language === "ro" ? "native" : "clone";
   const voice = chosenVoice() || "ancient-male", name = voices[voice]?.name || voice;
-  if (defaultVoice && defaultVoice.id === id) { $("status").textContent = `Take ${id} already is the Romanian ${name}.`; return; }
-  const was = defaultVoice ? `take ${defaultVoice.id} (${defaultVoice.f0_hz} Hz)` : "none yet";
-  if (!undo && !confirm(`Make take ${id} the Romanian "${name}" voice?\n\nRomanian lines with the ${name} voice that leave the ` +
-      `voice attributes empty, from this page and from agents, will clone this take from now on.\n\nCurrent: ${was}. ` +
+  const label = kind === "native" ? "native Romanian voice" : "Romanian clone (from English)";
+  let cur = null;
+  try { const h = await api(`/api/default-voice?voice=${encodeURIComponent(voice)}&kind=${kind}`); cur = h.id ? h : null; } catch (e) {}
+  if (cur && cur.id === id) { $("status").textContent = `Take ${id} already is the ${name}'s ${label}.`; return; }
+  const which = kind === "native" ? "the native voice" : "the clone";
+  const now = roKind() === kind ? `This page's setting picks ${which} now.` : `This page's setting picks the other one now.`;
+  if (!confirm(`Make take ${id} the ${name}'s ${label}?\n\nRomanian lines with this voice use it whenever the Romanian ` +
+      `voice setting picks ${which} (agents follow your saved setting; Recommended picks ${voices[voice]?.romanian?.use === "native" ? "the native voice" : "the clone"} ` +
+      `for this voice). ${now}\n\nCurrent: ${cur ? `take ${cur.id} (${cur.f0_hz} Hz)` : "none yet"}. ` +
       `It is remembered, so you can switch back.`)) return;
   try {
-    const prev = defaultVoice;
-    defaultVoice = await api("/api/default-voice", {id, voice});
+    const set = await api("/api/default-voice", {id, voice, kind});
+    if (roKind() === kind) defaultVoice = set;
     syncVoiceHint();
-    $("status").textContent = `Romanian ${name} is now take ${id} (${defaultVoice.f0_hz} Hz). `;
-    if (prev && !undo) $("status").append(el("button", {class: "undo", onclick: restorePreviousVoice,
-      tip: `Switch back to take ${prev.id}.`}, "Undo"));
+    $("status").textContent = `The ${name}'s ${label} is now take ${id} (${set.f0_hz} Hz). `;
+    if (cur) $("status").append(el("button", {class: "undo", onclick: () => restorePreviousVoice(voice, kind),
+      tip: `Switch back to take ${cur.id}.`}, "Undo"));
   } catch (e) { $("status").textContent = "Error: " + e.message; }
 }
 
-async function restorePreviousVoice() {
+async function restorePreviousVoice(voice, kind) {
   try {
-    defaultVoice = await api("/api/default-voice/restore-previous", {voice: chosenVoice() || "ancient-male"});
+    const back = await api("/api/default-voice/restore-previous", {voice, kind});
+    if (roKind() === kind && (chosenVoice() || "ancient-male") === voice) defaultVoice = back;
     syncVoiceHint();
-    $("status").textContent = `Back to take ${defaultVoice.id} (${defaultVoice.f0_hz} Hz).`;
+    $("status").textContent = `Back to take ${back.id} (${back.f0_hz} Hz).`;
   } catch (e) { $("status").textContent = "Error: " + e.message; }
 }
 
 async function loadDefaultVoice() {
   try {
-    const h = await api("/api/default-voice?voice=" + encodeURIComponent(chosenVoice() || "ancient-male"));
+    const h = await api("/api/default-voice?voice=" + encodeURIComponent(chosenVoice() || "ancient-male") + "&kind=" + roKind());
     defaultVoice = h.id ? h : null;
   } catch (e) { defaultVoice = null; }
   syncVoiceHint();
@@ -303,10 +347,11 @@ function applySettings(eff, saved = {}) {
   $("cfg").value = eff.cfg_scale; $("speed").value = eff.speed;
   $("pitch").value = eff.pitch; $("tempo").value = eff.tempo;
   $("blend").value = eff.blend ?? 0; $("double").value = eff.double_ms ?? 0; $("bass").value = eff.bass_db ?? 0;
-  $("reverb").value = eff.reverb; $("check").checked = !!eff.check;
+  $("reverb").value = eff.reverb; $("check").checked = !!eff.check; $("roVoice").value = eff.ro_voice || "auto";
   $("instruction").value = eff.instruction || voices[$("voice").value]?.instruction || "";
   showPreset();
   syncLanguage();
+  syncTune();
 }
 
 function collectSettings() {
@@ -319,7 +364,7 @@ function collectSettings() {
     cfg_scale: parseFloat($("cfg").value), speed: parseFloat($("speed").value),
     pitch: parseFloat($("pitch").value), tempo: parseFloat($("tempo").value),
     blend: parseFloat($("blend").value), double_ms: parseFloat($("double").value), bass_db: parseFloat($("bass").value),
-    reverb: $("reverb").value, check: $("check").checked, instruction: custom ? desc : null,
+    reverb: $("reverb").value, ro_voice: $("roVoice").value, check: $("check").checked, instruction: custom ? desc : null,
   };
   // A cleared number field is left out (it keeps the default), never saved as empty.
   for (const k of ["cfg_scale", "speed", "pitch", "tempo", "blend", "double_ms", "bass_db"]) if (!Number.isFinite(c[k])) delete c[k];
@@ -331,7 +376,7 @@ function describeSettings(c) {
   const names = {room: "light (large room)", hall: "medium (hall)", cathedral: "heavy (cathedral)", none: "none"};
   return [`Language: ${c.language === "ro" ? "Romanian" : "English"}`,
     `Voice: ${c.instruction ? "your own description (\"" + c.instruction.slice(0, 60) + (c.instruction.length > 60 ? "…" : "") + "\")" : (voices[c.voice]?.name || c.voice)}`,
-    `Preset: ${c.preset}`,
+    `Effects: ${c.preset}`, `Romanian voice: ${{auto: "recommended", clone: "clone (English voice)", native: "native"}[c.ro_voice] || c.ro_voice}`,
     `Seed: ${c.seed === null ? "random each time" : c.seed}`, `Strength: ${c.cfg_scale ?? "default"}`, `Speed (Romanian): ${c.speed ?? "default"}`,
     `Pitch: ${c.pitch ?? "default"}`, `Tempo: ${c.tempo ?? "default"}`,
     `Blend (human share): ${c.blend ?? "default"}`, `Double: ${c.double_ms ?? "default"} ms`, `Bass: ${c.bass_db ?? "default"} dB`, `Reverb: ${names[c.reverb] || c.reverb}`,
@@ -365,7 +410,10 @@ function showPreset() {
   $("presetDesc").textContent = (presets[$("preset").value] || {}).description || "";
 }
 
-$("lang").addEventListener("change", syncLanguage);
+$("lang").addEventListener("change", () => { syncLanguage(); loadDefaultVoice(); });
+$("roVoice").addEventListener("change", loadDefaultVoice);
+$("tune").addEventListener("input", syncTune);
+$("tune").addEventListener("toggle", () => { try { localStorage.setItem("tuneOpen", $("tune").open ? "1" : ""); } catch (e) {} });
 $("preset").addEventListener("change", showPreset);  // effects never change who speaks
 $("voice").addEventListener("change", () => {
   const v = voices[$("voice").value];
@@ -374,6 +422,7 @@ $("voice").addEventListener("change", () => {
     $("instruction").value = isRo() ? "" : v.instruction;
     $("seed").value = v.seed;
   }
+  syncTune();
   syncVoiceHint();
   loadDefaultVoice();
 });
@@ -393,7 +442,8 @@ function renderTake(res, autoplay) {
   box.append(el("div", {class: "said"}, res.text));
   if (voices[res.voice] && res.language === "en") box.append(el("div", {class: "meta", tip: "The built-in voice: " + voices[res.voice].instruction}, "voice: " + voices[res.voice].name));
   else if (res.instruction) box.append(el("div", {class: "meta", tip: "The voice description used for this take."}, "voice: " + res.instruction));
-  else if (res.default_voice) box.append(el("div", {class: "meta", tip: "This Romanian take cloned the stored English take of its voice."}, "voice: " + (voices[res.voice]?.name || "default voice") + ", cloned (take " + res.like + ")"));
+  else if (res.default_voice) box.append(el("div", {class: "meta", tip: "This Romanian take spoke as a built-in voice: a clone of its stored English take, or its native Romanian voice (the Romanian voice setting)."},
+    "voice: " + (voices[res.voice]?.name || "default voice") + ({native: ", native Romanian", clone: ", cloned from English"}[res.ro_voice] || "") + " (take " + res.like + ")"));
   else if (res.like) box.append(el("div", {class: "meta", tip: "This take reused the voice of an earlier take."}, "voice of take " + res.like));
 
   const dl = el("span", {class: "dl"},
@@ -426,70 +476,53 @@ function renderTake(res, autoplay) {
   if (res.files.spectrogram) box.append(el("img", {src: "/files/" + encodeURIComponent(res.files.spectrogram), alt: "spectrogram",
     tip: "Waveform and spectrogram of the processed audio: energy over time and frequency. Speech shows formant bands and gaps between words."}));
 
-  const sel = el("select", {tip: "Pick another preset for this same take."});
-  for (const k of Object.keys(presets)) sel.append(el("option", {value: k}, k));
-  sel.value = res.preset;
-  const pitchIn = el("input", {type: "number", value: res.pitch ?? 0, min: -12, max: 12, step: 1, class: "small",
-    tip: "Pitch in semitones for the re-run: negative is lower and bigger."});
-  const tempoIn = el("input", {type: "number", value: res.tempo ?? 1, min: 0.5, max: 1.5, step: 0.05, class: "small",
-    tip: "Tempo for the re-run: below 1 is slower, same pitch."});
-  const blendIn = el("input", {type: "number", value: res.blend ?? 0, min: 0, max: 1, step: 0.05, class: "small",
-    tip: "Blend for the re-run: the human voice's share under the machine, 0-1."});
-  const doubleIn = el("input", {type: "number", value: res.double_ms ?? 0, min: 0, max: 60, step: 5, class: "small",
-    tip: "Double for the re-run, with Blend: the machine trails the voice by this many ms (10-30 thickens)."});
-  const bassIn = el("input", {type: "number", value: res.bass_db ?? 0, min: -12, max: 6, step: 1, class: "small",
-    tip: "Bass under 150 Hz for the re-run, dB: -6 when the words sit low under the bass."});
-  const revIn = el("select", {class: "small", tip: "Reverb for the re-run."});
-  revIn.innerHTML = '<option value="none">None</option><option value="room">Light (large room)</option><option value="hall">Medium (hall)</option><option value="cathedral">Heavy (cathedral)</option>';
-  revIn.value = res.reverb || "none";
+  // Re-running takes the panel's effects (preset, reverb and fine-tuning): change them there,
+  // or "Load settings" first to start from this take's.
   const rerunWith = async (extra, busy) => {
     setBusy(true, busy);
     try {
-      renderTake(await api("/api/fx", {id: res.id, preset: sel.value, check: $("check").checked,
-        pitch: parseFloat(pitchIn.value) || 0, tempo: parseFloat(tempoIn.value) || 1, reverb: revIn.value,
-        blend: parseFloat(blendIn.value) || 0, double_ms: parseFloat(doubleIn.value) || 0,
-        bass_db: parseFloat(bassIn.value) || 0, ...extra}), true);
+      renderTake(await api("/api/fx", {id: res.id, ...panelEffects(), check: $("check").checked, ...extra}), true);
       setBusy(false);
     } catch (e) { setBusy(false, "Error: " + e.message); }
   };
-  const rerun = el("button", {class: "rerun", tip: "Apply the chosen preset, pitch, tempo, blend, bass and reverb to this same performance in a second or two, without regenerating. Adds a new card, so you can compare.",
-    onclick: () => rerunWith({}, "Re-applying effects…")}, "Re-run effects");
   // Stray sound after the last word (an "mmm", a breath): cut it, or undo a cut. The take remembers.
   const strayTail = (res.warnings || []).some(w => w.includes("after the last word"));
-  const tailBtn = res.trim_end_s
-    ? el("button", {tip: "This take is cut just after its last word. Undo the cut and re-run with the settings on the left.",
-        onclick: () => rerunWith({trim_tail: false}, "Undoing the tail cut…")}, "Undo tail cut")
-    : strayTail ? el("button", {tip: "Cut the stray sound after the last word, in the gap before it, and re-run with the settings on the left. The take remembers the cut, so later re-runs keep it; the dry recording itself is untouched.",
-        onclick: () => rerunWith({trim_tail: true}, "Cutting the stray tail…")}, "Cut stray tail") : null;
-  const fxbox = el("div", {class: "fxbox"}, el("span", {class: "boxlbl head"}, "Effects"), sel,
-    el("span", {class: "boxlbl"}, "pitch"), pitchIn, el("span", {class: "boxlbl"}, "tempo"), tempoIn,
-    el("span", {class: "boxlbl"}, "blend"), blendIn, el("span", {class: "boxlbl"}, "double"), doubleIn,
-    el("span", {class: "boxlbl"}, "bass"), bassIn,
-    el("span", {class: "boxlbl"}, "reverb"), revIn, rerun, tailBtn);
-
-  const voiceBox = el("div", {class: "fxbox"}, el("span", {class: "boxlbl head"}, "Voice"),
-    el("button", {tip: "Clone this take's voice for the lines you make next: the model listens to this take's raw recording and speaks your new text in that same voice (same depth, rasp and pacing), in English or Romanian. Effects are applied fresh, so you can still change preset, pitch and reverb. It lasts while the 'Clone voice of take' box above is ticked; untick it to go back to designing the voice from the description. Only this page uses it: the default voice is unchanged.",
+  const loadSettings = () => {
+    $("text").value = res.text; $("seed").value = res.seed;
+    if (presets[res.preset]) { $("preset").value = res.preset; showPreset(); }
+    $("voice").value = voices[res.voice] ? res.voice : (res.instruction ? CUSTOM : "ancient-male");
+    $("lang").value = ["en", "ro"].includes(lang) ? lang : "en"; syncLanguage();
+    $("instruction").value = res.instruction || "";
+    if (res.speed) $("speed").value = res.speed;
+    $("pitch").value = res.pitch ?? 0; $("tempo").value = res.tempo ?? 1; $("reverb").value = res.reverb || "none";
+    $("blend").value = res.blend ?? 0; $("double").value = res.double_ms ?? 0; $("bass").value = res.bass_db ?? 0;
+    if (res.cfg_scale) $("cfg").value = res.cfg_scale;
+    syncTune(); syncVoiceHint(); loadDefaultVoice();
+  };
+  box.append(el("div", {class: "actions"},
+    el("button", {class: "rerun", tip: "Apply the panel's effects (preset, reverb and fine-tuning) to this same performance in a second or two, without regenerating. Adds a new card, so you can compare. To start from this take's own settings, press Load settings first.",
+      onclick: () => rerunWith({}, "Re-applying effects…")}, "Re-run effects"),
+    res.trim_end_s
+      ? el("button", {class: "rerun", tip: "This take is cut just after its last word. Undo the cut (re-runs with the panel's effects).",
+          onclick: () => rerunWith({trim_tail: false}, "Undoing the tail cut…")}, "Undo tail cut")
+      : strayTail ? el("button", {class: "rerun", tip: "Cut the stray sound after the last word, in the gap before it (re-runs with the panel's effects). The take remembers the cut; the dry recording itself is untouched.",
+          onclick: () => rerunWith({trim_tail: true}, "Cutting the stray tail…")}, "Cut stray tail") : null,
+    el("button", {tip: "Copy this take's text, language, voice, effects and fine-tuning into the panel above, to tweak one thing and regenerate or re-run. Doesn't change your saved defaults.",
+      onclick: loadSettings}, "Load settings"),
+    el("button", {tip: "Every new line clones this take's voice (same depth, rasp and pacing), in English or Romanian, while 'Clone voice of take' above is ticked: for a scene that sounds like one speaker.",
       onclick: () => { likeTake = res.id; $("likeId").textContent = res.id; $("useLike").disabled = false; $("useLike").checked = true; }}, "Clone voice for next lines"),
-    el("button", {tip: "Make this take what Romanian lines clone for the voice selected above (when you leave the voice attributes empty). Best with an English take of that voice.",
-      onclick: () => setDefaultVoice(res.id)}, "Set as Romanian voice"));
-  const settingsBox = el("div", {class: "fxbox"}, el("span", {class: "boxlbl head"}, "Settings"),
-    el("button", {tip: "Copy this take's text, language, seed, preset, strength or speed, pitch, tempo, reverb and voice description back into the panel above, to tweak one thing and regenerate. Doesn't clone the voice and doesn't change your saved defaults.",
-      onclick: () => {
-        $("text").value = res.text; $("seed").value = res.seed;
-        if (presets[res.preset]) { $("preset").value = res.preset; showPreset(); }
-        $("voice").value = voices[res.voice] ? res.voice : (res.instruction ? CUSTOM : "ancient-male");
-        $("lang").value = ["en", "ro"].includes(lang) ? lang : "en"; syncLanguage();
-        $("instruction").value = res.instruction || "";
-        syncVoiceHint();
-        if (res.speed) $("speed").value = res.speed;
-        $("pitch").value = res.pitch ?? 0; $("tempo").value = res.tempo ?? 1; $("reverb").value = res.reverb || "none";
-        $("blend").value = res.blend ?? 0; $("double").value = res.double_ms ?? 0; $("bass").value = res.bass_db ?? 0;
-        if (res.cfg_scale) $("cfg").value = res.cfg_scale;
-      }}, "Load settings"));
-  box.append(el("div", {class: "bottom"}, fxbox, voiceBox, settingsBox));
+    el("button", {tip: "Make this take what Romanian lines with the voice selected above clone (when the attributes are left empty): an English take as its clone, a Romanian one as its native voice. The one it replaces is kept, so you can undo.",
+      onclick: () => setDefaultVoice(res)}, "Set as Romanian voice")));
 
   $("takes").prepend(box);
   if (autoplay) wet.play().catch(() => {});
+}
+
+function panelEffects() {
+  return {preset: $("preset").value, reverb: $("reverb").value,
+          pitch: parseFloat($("pitch").value) || 0, tempo: parseFloat($("tempo").value) || 1,
+          blend: parseFloat($("blend").value) || 0, double_ms: parseFloat($("double").value) || 0,
+          bass_db: parseFloat($("bass").value) || 0};
 }
 
 $("go").addEventListener("click", async () => {
@@ -498,15 +531,15 @@ $("go").addEventListener("click", async () => {
   const seed = $("seed").value.trim();
   const body = {
     text, voice: chosenVoice(), instruction: isRo() || !chosenVoice() ? $("instruction").value : null,
-    preset: $("preset").value, language: $("lang").value,
+    language: $("lang").value, ...panelEffects(),
     seed: seed ? parseInt(seed, 10) : null, like: $("useLike").checked ? likeTake : null, check: $("check").checked,
-    pitch: parseFloat($("pitch").value) || 0, tempo: parseFloat($("tempo").value) || 1, reverb: $("reverb").value,
-    blend: parseFloat($("blend").value) || 0, double_ms: parseFloat($("double").value) || 0,
-    bass_db: parseFloat($("bass").value) || 0,
   };
   // Keeping a voice with the stock description would steer away from it: send none, for a pure clone.
   if (body.like && body.instruction !== null && stockDescriptions().includes(body.instruction.trim())) body.instruction = null;
-  if (isRo()) { body.speed = parseFloat($("speed").value) || 0.9; if (body.instruction !== null && !body.instruction.trim()) body.instruction = null; }
+  if (isRo()) {
+    body.speed = parseFloat($("speed").value) || 0.9; body.ro_voice = $("roVoice").value;
+    if (body.instruction !== null && !body.instruction.trim()) body.instruction = null;
+  }
   else body.cfg_scale = parseFloat($("cfg").value) || 6;
   setBusy(true, "Speaking… (the first take after a start also loads the model)");
   const t0 = performance.now();
@@ -530,6 +563,7 @@ $("text").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.ctrlKe
     $("voice").append(el("option", {value: CUSTOM}, "Your own description"));
     settings = await api("/api/settings");
     applySettings(settings.effective, settings.saved);
+    try { $("tune").open = localStorage.getItem("tuneOpen") === "1"; } catch (e) {}
     await loadDefaultVoice();
   } catch (e) { $("status").textContent = "Server not reachable: " + e.message; }
 })();

@@ -97,8 +97,8 @@ picked by ear:
 | `vampire-female` | Low, husky and close (~175 Hz): the same, as a woman. |
 
 Or write your own description (`instruction`) instead. Add a voice by adding an entry to
-`server/voices.json`: a description and a seed whose voice you like. A voice can also carry
-`"romanian": {"attributes", "seed"}` (see below).
+`server/voices.json`: a description and a seed whose voice you like, and for Romanian
+`"romanian": {"use", "attributes", "seed"}` (see below).
 
 ### Two engines, one voice
 
@@ -121,19 +121,22 @@ with a short pause. The same paragraph then came out complete on every seed trie
 sentence still misses words after 3 tries carries a warning. Below `speed` 0.75 the model starts
 repeating words to fill the time it's given, so the slowest settings are `tempo`'s job.
 
-**Romanian clones the chosen voice.** OmniVoice's own deepest design ("very low pitch") lands
-around 100-130 Hz, which sounds small under the Reaper presets. Breeze's English Reaper voice sits
-near 65 Hz. So by default Romanian lines **clone an English take of the chosen voice**, stored in
-`voices\` (safe from clearing `output\`) and made on first use: for `ancient-male`, the
-**default voice**, Breeze tries its own seeds until the voice lands under 75 Hz (seed 12 gives
-~65 Hz); for any other voice, one take from its description and seed. Cloned Romanian keeps that
-depth (66-69 Hz measured) and Whisper still transcribes it perfectly. A clone also keeps the
-English accent of the take it copies, which shows on some voices: `young-woman` got a **native
-Romanian** voice instead, one OmniVoice take designed from attributes (`female, young adult,
-very low pitch`, seed 12) that her Romanian lines clone. Replace a voice's clone
-with **Set as Romanian voice** on any take (for the voice selected), or
-`say.py --default-voice <take> [--voice NAME]`. Whisper can't judge accent, so listen for
-English colouring in cloned Romanian.
+**Romanian speaks as the chosen voice, two ways** (`ro_voice`; the page's **Romanian voice**):
+
+| `ro_voice` | Romanian lines clone | Sounds |
+|---|---|---|
+| `clone` | an English take of the voice | its depth and delivery (65 Hz for the Reaper), with a little English accent |
+| `native` | a native Romanian take, designed by OmniVoice from the voice's `romanian.attributes` and `romanian.seed` | a native accent, but higher and smaller (OmniVoice's deepest lands around 100-130 Hz) |
+| `auto` (default) | each voice's better one (`romanian.use`): `native` for `young-woman`, whose clone sounded English; `clone` for the rest | |
+
+Both takes are made on first use and stored in `voices\` (safe from clearing `output\`). For
+`ancient-male`, the clone is the **default voice**: Breeze tries its own seeds until the voice
+lands under 75 Hz (seed 12 gives ~65 Hz); cloned Romanian keeps that depth (66-69 Hz measured)
+and Whisper still transcribes it perfectly. Only `young-woman`'s native seed was picked by ear;
+the others are a starting point. Replace a voice's stored take with **Set as Romanian voice** on
+any take (an English take becomes its clone, a Romanian one its native voice), or
+`say.py --ro-take <take> [--voice NAME] [--ro-voice native]`. Whisper can't judge accent, so
+listen for English colouring in cloned Romanian.
 
 **Clone voice for next lines / `--like` works across engines and languages** too: any take's voice can
 speak either language. In English, `--like` without `--instruction` is a pure clone; with one,
@@ -253,7 +256,7 @@ python scripts\say.py "We are the dark." --tempo 0.85 --format mp3 --out D:\clip
 python scripts\say.py "Noi suntem întunericul." --lang ro                  # default voice
 python scripts\say.py "Noi suntem întunericul." --lang ro --like 20260101-120000-ab12
 python scripts\say.py "Noi suntem întunericul." --lang ro --instruction "male, middle-aged, low pitch" --speed 0.8
-python scripts\say.py --default-voice 20260101-120000-ab12                    # set the default voice
+python scripts\say.py "Noi suntem întunericul." --lang ro --voice young-woman --ro-voice clone
 python scripts\say.py --presets
 ```
 
@@ -274,12 +277,13 @@ python scripts\say.py --presets
 | `--trim-tail` / `--no-trim-tail` | Cut stray sound after the last scripted word (an "mmm", a breath), in the gap after it; the take remembers the cut, so later `--fx` renders keep it. The dry file is untouched; `--no-trim-tail` undoes it. |
 | `--reverb KIND` | `none`, `room` (light; default), `hall` (medium), `cathedral` (heavy, ~4.5 s tail). |
 | `--like TAKE` | Keep an earlier take's voice for a new line, in either language, so a scene sounds like one speaker. |
-| `--default-voice [TAKE]` | Show the default voice, set it to TAKE, or `previous` to undo the last change. |
+| `--ro-voice MODE` | Romanian: `clone` (the voice's English take, cloned), `native` (its native Romanian voice) or `auto` (default: each voice's better one). |
+| `--ro-take [TAKE]` | Show which stored take `--voice`'s Romanian lines clone (with `--ro-voice native`: its native one), set it to TAKE, or `previous` to undo. (`--default-voice` is the old name.) |
 | `--settings` | Show the defaults in effect (built-in, or saved in `config.local.json`). |
 | `--fx TAKE` | Re-run effects (preset, pitch, tempo, reverb) on an earlier take; no new generation. |
 | `--check` / `--no-check` | Whisper transcribes dry and processed audio, prints a words-heard score, and draws a spectrogram. On by default. |
 | `--out DIR` / `--name STEM` | Copy the processed audio, its voice stem and the dry WAV to DIR (never overwrites). |
-| `--format F` | With `--out`: `both` (default: processed WAV + MP3, voice stem WAV and dry WAV), `wav` (the same without the MP3) or `mp3` (just the MP3: WhatsApp and most messengers take MP3, not WAV). |
+| `--format F` | With `--out`: `all` (default: processed WAV + MP3, voice stem WAV, dry WAV, and with the check `_words.json` and `.srt`), `wav` (the same without the MP3) or `mp3` (just the MP3: WhatsApp and most messengers take MP3, not WAV). |
 | `--wait S` | Wait up to S seconds for the server (startup takes ~60 s). |
 | `--json` | Print only the server's JSON response, plus `paths` (the delivered files). |
 | `--play` | Play the processed take on this machine's speakers; returns when playback ends (exit 1 if it couldn't play). |
@@ -306,14 +310,14 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "voice"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
+| `POST /api/speak` | `{"text", "language"?, "instruction"?, "preset"?, "seed"?, "voice"?, "ro_voice"?, "cfg_scale"?, "speed"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "like"?, "check"?}` | the take: id, seed, `files` (dry, wet, mp3, voice; with `check` spectrogram, words, srt), `words` (word timings), durations, timings; `heard` / `match` / `asr_unreliable` with `check` (or `check_error`); Romanian: per-`sentences` scores; `warnings` |
 | `POST /api/fx` | `{"id", "preset"?, "pitch"?, "tempo"?, "blend"?, "double_ms"?, "bass_db"?, "trim_tail"?, "reverb"?, "check"?}` | the take re-processed |
 | `GET /api/presets` | | names and descriptions |
-| `GET /api/voices` | | the built-in voices: name, description, seed, and each one's Romanian clone |
+| `GET /api/voices` | | the built-in voices: `name`, `instruction`, `seed`, `about`, `romanian` (the catalog's `use`, `attributes`, `seed`) and `romanian_takes` (the stored `clone` and `native` takes, or null) |
 | `GET /api/health` | | which models are loaded, `standby`, idle seconds, VRAM |
 | `POST /api/unload` | | free the GPU: drop every model, keep running (standby) |
-| `GET` / `POST /api/default-voice` | `{"id"}` to set | the default voice: source take id, text, median pitch, `previous` |
-| `POST /api/default-voice/restore-previous` | | swap back to the previous default voice |
+| `GET` / `POST /api/default-voice` | `{"id", "voice"?, "kind"?}` to set (`?voice=&kind=` to read) | the stored take a voice's Romanian lines clone (`kind`: `clone`, `native`, or `auto`, the default: the kind they use now): source take id, text, median pitch, `previous` |
+| `POST /api/default-voice/restore-previous` | `{"voice"?, "kind"?}` | swap back to the previous one |
 | `GET` / `POST` / `DELETE /api/settings` | the settings to save | `effective`, `saved`, `repo` defaults; save / reset `config.local.json` |
 | `DELETE /api/takes/<id>` | | delete every file of one take (what `--no-save` does) |
 | `DELETE /files/<take>_fx-...` | | delete one rendered file (what `--fx --no-save` does); a take's dry voice and record can't be deleted this way |
@@ -321,8 +325,7 @@ in `config.local.json`; neither lives in `output\`. All of these are gitignored.
 
 `voice` and `instruction` omitted mean the saved voice, or the built-in default (`ancient-male`):
 English, its description and seed (or, in English only, the description saved on the page);
-Romanian, a clone of it (made on first use). `/api/default-voice` and
-`/api/default-voice/restore-previous` take a `voice` (default `ancient-male`). In English `""` means none (plain TTS, or a pure clone with
+Romanian, its stored take per `ro_voice` (made on first use). In English `""` means none (plain TTS, or a pure clone with
 `like`). Bad input (unknown language, preset or reverb, a seed outside 0..2^32-1, blank text)
 is a 4xx with a message, not a 500. Requests must use Host `127.0.0.1` or `localhost`.
 
@@ -368,13 +371,15 @@ subtitles for an editor's timeline. `--out` delivers both as `<name>_words.json`
 
 ### The page
 
-The page at http://127.0.0.1:8190/ does the same: text, language, voice (who speaks: fills in
-its description and seed; editing the description makes it your own), effects preset, seed, strength (English) or speed (Romanian),
-pitch, tempo, reverb, **Transcribe + spectrogram**, and per take: **WAV** / **MP3** / **voice WAV** download
-links, an **Effects** box (another preset, pitch, tempo or reverb on the same take, no
-regeneration), **Clone voice for next lines** (later lines clone it, in either language), **Set as Romanian
-voice** (what Romanian lines with the selected voice clone when the attributes are left empty) and **Load settings**
-(copy the take's settings back into the panel). Hover over any control for 1 s for an
+The page at http://127.0.0.1:8190/ does the same. Up front: the text, **Language**, **Voice** (who
+speaks: fills in its description and seed; editing the description makes it your own),
+**Effects**, **Reverb**, and in Romanian the **Romanian voice**. **Fine-tuning** (folded away; its
+heading lists anything not at its default) holds pitch, tempo, blend, bass, seed, strength
+(English), speed (Romanian) and doubling. Each take has its downloads (**WAV**, **MP3**, **voice
+WAV**, with the check **words** and **SRT**) and one row of actions: **Re-run effects** (the
+panel's effects on the same performance, no regeneration), **Cut stray tail** when it warns about
+one, **Load settings** (the take's settings back into the panel), **Clone voice for next lines**
+and **Set as Romanian voice**. Hover over any control for 1 s for an
 explanation. `Ctrl+Enter` speaks.
 
 ### Speed (RTX 5080, warm)

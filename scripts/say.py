@@ -2,25 +2,19 @@
 
 The server must be running (start.cmd). Everything stays on 127.0.0.1.
 
-    python scripts/say.py "We are the dark."              # defaults: ancient-male voice, reaper-drone, strength 6, light room
-    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4  # another voice, part human
-    python scripts/say.py --voices                                      # the built-in voices
-    python scripts/say.py "We are the dark." --seed random --reverb none --no-check
-    python scripts/say.py "..." --instruction "An ancient, colossal voice..." --seed 7
-    python scripts/say.py "..." --preset harbinger --check --out some/dir
-    python scripts/say.py "..." --like 20260101-120000-ab12                     # same voice as that take
-    python scripts/say.py "Noi suntem întunericul." --lang ro          # clones the default voice
-    python scripts/say.py "Noi suntem întunericul." --lang ro --like 20260101-120000-ab12
-    python scripts/say.py --default-voice                               # show it
-    python scripts/say.py --default-voice 20260101-120000-ab12          # set it
-    python scripts/say.py --default-voice previous                      # undo the last change
-    python scripts/say.py --settings                                    # the defaults in effect
-    python scripts/say.py --fx 20260101-120000-ab12 --preset harbinger --check  # re-run effects only
-    python scripts/say.py --fx 20260101-120000-ab12 --blend 0.5 --double 20     # half machine, half human
-    python scripts/say.py --presets
+    python scripts/say.py "We are the dark."                          # the default: the Reaper (ancient-male, reaper-drone)
+    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4 --out D:/clips
+    python scripts/say.py "Come closer." --voice vampire-female --preset dry --reverb none
+    python scripts/say.py "Noi suntem întunericul." --lang ro --voice young-woman
+    python scripts/say.py "..." --instruction "A tired old robot, slow and kind." --seed random
+    python scripts/say.py "..." --like 20260101-120000-ab12           # the voice of an earlier take
+    python scripts/say.py --fx 20260101-120000-ab12 --preset wraith --reverb room   # new effects, same take
+    python scripts/say.py --voices                                    # also --presets, --settings
+    python scripts/say.py --unload                                    # free the GPU, keep the server
 
---check transcribes the dry and processed audio with Whisper and draws a
-spectrogram: the words-heard score says whether the effects buried the speech.
+With the check (on by default) Whisper transcribes the take: a words-heard score says whether
+the effects buried the speech, and --out also delivers word timings (_words.json) and subtitles
+(.srt). Every option is grouped below; the server's README has the full reference.
 
 Exit status: 0 done, 1 failed or no server, 2 bad arguments.
 """
@@ -91,7 +85,7 @@ def play(path: Path) -> None:
     raise RuntimeError("no audio player found (tried " + ", ".join(c[0] for c in players) + ")")
 
 
-def deliver(res: dict, out: Path | None, name: str | None, formats: str = "both") -> list[Path]:
+def deliver(res: dict, out: Path | None, name: str | None, formats: str = "all") -> list[Path]:
     """Copy the processed audio (WAV and/or MP3), its aligned voice stem, the dry WAV and (with
     the check) the word timings and subtitles to `out`, never overwriting."""
     paths = []
@@ -122,76 +116,110 @@ def given(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
+RELOAD = "~20 s, or ~1 min if the fast paths were never compiled"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("text", nargs="?", help="what to say ((sigh)-style vocal events allowed in English)")
+
+    who = ap.add_argument_group("who speaks")
+    who.add_argument("--voice", help="a built-in voice (--voices lists them): ancient-male (default), ancient-female, "
+                     "young-woman, child, old-frail, vampire-male, vampire-female. Brings its own description and seed")
+    who.add_argument("--instruction", help="your own voice description instead of --voice. English: free text "
+                     "('' for none; with --like, the default is a pure clone). Romanian: attributes such as "
+                     "'male, elderly, very low pitch'")
+    who.add_argument("--lang", default="en", choices=["en", "ro"], help="en (default): Breeze TTS 2; ro: OmniVoice")
+    who.add_argument("--ro-voice", dest="ro_voice", choices=["auto", "clone", "native"],
+                     help="Romanian: speak as a clone of the voice's English take (its depth and delivery, a little "
+                     "English accent), or as its native Romanian voice (native accent, higher and smaller). auto "
+                     "(default): each voice's better one")
+    who.add_argument("--like", metavar="TAKE", help="keep the voice of an earlier take, in either language")
+    who.add_argument("--seed", help="a number to reproduce a take, or 'random' for a new voice "
+                     "(default: the voice's own seed)")
+    who.add_argument("--cfg", type=float, help="English: how strictly the voice follows its description "
+                     "(default 6; Breeze recommends 4; 0.5-10)")
+    who.add_argument("--speed", type=float, help="Romanian: the model's speaking rate, 0.75-1.3 (default 0.9); "
+                     "slower than that is --tempo's job")
+
+    fx = ap.add_argument_group("effects (all work with --fx too)")
+    fx.add_argument("--preset", help="the effects: reaper-drone (default), reaper, harbinger, sovereign, demon, "
+                    "synthetic-ai, ai-choir, wraith, hive, droid, dry (--presets describes them)")
+    fx.add_argument("--reverb", choices=["none", "room", "hall", "cathedral"],
+                    help="space added last: room (light; default), hall, cathedral, or none for a dry take")
+    fx.add_argument("--pitch", type=float, help="semitones, -12..12, on the finished sound (-3: lower and bigger)")
+    fx.add_argument("--tempo", type=float, help="time-stretch, 0.5-1.5, same pitch (0.85 = slower)")
+    fx.add_argument("--blend", type=float, help="mix the human voice under the effect, 0-1 (0 all effect, 0.5 half "
+                    "and half, 1 all human), sample-aligned")
+    fx.add_argument("--bass", type=float, metavar="DB", help="shelve the bass under 150 Hz, -12..6 dB "
+                    "(-6 when a take warns that the words sit low under the bass)")
+    fx.add_argument("--double", type=float, metavar="MS", help="with --blend: the effect trails the voice by MS ms, "
+                    "0-60 (default 0; 10-30 thickens it, and can read as extra reverb)")
+    fx.add_argument("--trim-tail", dest="trim_tail", action="store_true", default=None,
+                    help="cut stray sound after the last word (an 'mmm', a breath) when a take warns about it; "
+                    "the take remembers the cut")
+    fx.add_argument("--no-trim-tail", dest="trim_tail", action="store_false", help="undo a take's --trim-tail")
+
+    out = ap.add_argument_group("check, output and playback")
+    out.add_argument("--check", action="store_true", default=None,
+                     help="transcribe with Whisper, time the words, draw a spectrogram (on by default)")
+    out.add_argument("--no-check", dest="check", action="store_false", help="skip the check (~1 s faster)")
+    out.add_argument("--out", type=Path, help="copy the results to this folder (created if needed; never overwrites)")
+    out.add_argument("--name", help="file name stem for --out")
+    out.add_argument("--format", choices=["all", "both", "wav", "mp3"], default="all",
+                     help="what --out copies: all (default: the processed WAV and MP3, the aligned voice WAV, the "
+                     "dry WAV, and with the check _words.json and .srt), wav (all but the MP3) or mp3 (just the "
+                     "MP3: WhatsApp and most messengers reject WAV). 'both' is the old name for all")
+    out.add_argument("--play", action="store_true", help="play the take on this machine's speakers (returns when done)")
+    out.add_argument("--no-save", action="store_true", help="delete what this call made from output/ when done "
+                     "(after --play and --out): for speech only meant to be heard")
+    out.add_argument("--json", action="store_true", help="print only the server's JSON (plus the delivered paths)")
+
+    manage = ap.add_argument_group("takes, voices and the server")
+    manage.add_argument("--fx", metavar="TAKE", help="re-run effects on an earlier take: no new generation, ~1-3 s")
+    manage.add_argument("--voices", action="store_true", help="list the built-in voices")
+    manage.add_argument("--presets", action="store_true", help="list the effects presets")
+    manage.add_argument("--settings", action="store_true",
+                        help="show the defaults in effect (built-in, or the user's saved config.local.json)")
+    manage.add_argument("--ro-take", "--default-voice", dest="ro_take", nargs="?", const="", metavar="TAKE",
+                        help="show which stored take --voice's Romanian lines clone (the kind they use now; "
+                        "--ro-voice clone or native for a specific one), set it to TAKE, or 'previous' to undo")
+    manage.add_argument("--unload", action="store_true", help="free the GPU: the server drops its models but keeps "
+                        f"running and reloads them on the next request ({RELOAD}); it also does this by itself "
+                        "after 15 idle minutes")
+    manage.add_argument("--wait", type=float, default=5, help="seconds to wait for the server to come up (180 "
+                        "after starting it)")
+    return ap
+
+
+def request_for(args: argparse.Namespace) -> tuple[str, dict]:
+    """The API call a take needs: (path, body). Options left out stay out, so the server's
+    (and the user's saved) defaults apply."""
+    effects = {"preset": args.preset, "check": args.check, "pitch": args.pitch, "tempo": args.tempo,
+               "reverb": args.reverb, "blend": args.blend, "double_ms": args.double, "bass_db": args.bass,
+               "trim_tail": args.trim_tail}
+    if args.fx:
+        return "/api/fx", given({"id": args.fx, **effects})
+    body = given({"text": args.text, "voice": args.voice, "instruction": args.instruction, "language": args.lang,
+                  "ro_voice": args.ro_voice, "like": args.like, "cfg_scale": args.cfg, "speed": args.speed, **effects})
+    if args.seed is not None:  # omitted: the voice's (or the saved) seed
+        body["seed"] = None if args.seed.lower() == "random" else int(args.seed)
+    return "/api/speak", body
+
+
 def main() -> int:
     # Piped (as agents run it), Windows defaults stdout to cp1252, which can't print
     # Romanian letters such as ș and ț. A console already gets Unicode.
     if not sys.stdout.isatty():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("text", nargs="?", help="what to say (English; (sigh)-style vocal events allowed)")
-    ap.add_argument("--voice", help="who speaks: a built-in voice (--voices lists them; default ancient-male), "
-                    "with its own description and seed. In Romanian, a clone of that voice")
-    ap.add_argument("--instruction", help="a voice description of your own instead of --voice. English: free text "
-                    "('' for none; with --like, default is a pure clone). Romanian: attributes")
-    ap.add_argument("--preset", help="effects preset (default: reaper-drone)")
-    ap.add_argument("--lang", default="en", choices=["en", "ro"], help="en (default): Breeze TTS 2; ro: OmniVoice")
-    ap.add_argument("--speed", type=float, help="Romanian only: the model's speaking rate, 0.75-1.3, default 0.9 "
-                    "(for slower than that, use --tempo)")
-    ap.add_argument("--pitch", type=float, help="semitones, -12..12, applied with the effects "
-                    "(e.g. -3 for a lower, bigger voice); works with --fx too")
-    ap.add_argument("--reverb", choices=["none", "room", "hall", "cathedral"],
-                    help="space added last: none, room (light; the default), hall (medium), cathedral (heavy); "
-                    "works with --fx too")
-    ap.add_argument("--tempo", type=float, help="time-stretch, 0.5-1.5, applied with the effects "
-                    "(0.85 = slower, same pitch); works with --fx too")
-    ap.add_argument("--blend", type=float, help="0-1: mix the human voice under the machine (0 = all machine, "
-                    "0.5 = half and half, 1 = all voice), sample-aligned; works with --fx too")
-    ap.add_argument("--double", type=float, metavar="MS", help="with --blend: let the machine trail the voice by "
-                    "MS ms (0-60; 10-30 thickens it into one doubled voice); works with --fx too")
-    ap.add_argument("--bass", type=float, metavar="DB", help="shelve the bass under 150 Hz, -12..6 dB (negative "
-                    "= less: -6 when the words sit low under a boomy voice); works with --fx too")
-    ap.add_argument("--trim-tail", dest="trim_tail", action="store_true", default=None,
-                    help="cut stray sound after the last scripted word (an 'mmm', a breath); remembered by the take, "
-                    "so later --fx renders keep the cut; works with --fx too")
-    ap.add_argument("--no-trim-tail", dest="trim_tail", action="store_false", help="undo a take's --trim-tail")
-    ap.add_argument("--seed", help="a number to reproduce a take; 'random' for a new voice "
-                    "(default: 74525861)")
-    ap.add_argument("--cfg", type=float, help="English only: instruction strength (default 6; Breeze recommends 4)")
-    ap.add_argument("--like", metavar="TAKE", help="keep the voice of an earlier take (voice direction)")
-    ap.add_argument("--check", action="store_true", default=None,
-                    help="transcribe with Whisper and draw a spectrogram (on by default)")
-    ap.add_argument("--no-check", dest="check", action="store_false", help="skip the transcription check")
-    ap.add_argument("--fx", metavar="TAKE", help="re-run effects on an earlier take; no new generation")
-    ap.add_argument("--presets", action="store_true", help="list presets and exit")
-    ap.add_argument("--voices", action="store_true", help="list the built-in voices and exit")
-    ap.add_argument("--default-voice", dest="default_voice", nargs="?", const="", metavar="TAKE",
-                    help="show the default voice (what Romanian clones unless told otherwise), set it to TAKE, "
-                    "or 'previous' to undo the last change")
-    ap.add_argument("--unload", action="store_true",
-                    help="free the GPU: the server drops its models but keeps running; the next request "
-                    "reloads them (~20 s, or ~1 min if the fast paths were never compiled). It also does this by itself after 15 idle minutes")
-    ap.add_argument("--settings", action="store_true",
-                    help="show the defaults in effect: built-in, or the user's saved ones (config.local.json)")
-    ap.add_argument("--out", type=Path, help="copy results here (never overwrites)")
-    ap.add_argument("--name", help="file name stem for --out")
-    ap.add_argument("--format", choices=["both", "wav", "mp3"], default="both",
-                    help="what --out copies: both (default: processed WAV + MP3, the aligned voice WAV, the dry "
-                    "WAV, and with the check the word timings JSON and .srt), wav (the same without the MP3) or mp3 "
-                    "(just the MP3, e.g. for WhatsApp). --out creates the folder if needed")
-    ap.add_argument("--wait", type=float, default=5, help="seconds to wait for the server to come up")
-    ap.add_argument("--json", action="store_true", help="print the raw server response")
-    ap.add_argument("--no-save", action="store_true",
-                    help="delete the take's files from output/ when done (after --play and/or --out): for speech "
-                    "that's only meant to be heard")
-    ap.add_argument("--play", action="store_true",
-                    help="play the processed audio on this machine's speakers when it's ready (blocks until done)")
+    ap = build_parser()
     args = ap.parse_args()
 
     if args.seed is not None and args.seed.lower() != "random" and not args.seed.isdigit():
         ap.error("--seed takes a number or 'random'")
-    if not (args.text or args.fx or args.presets or args.default_voice is not None or args.settings or args.unload
+    if not (args.text or args.fx or args.presets or args.ro_take is not None or args.settings or args.unload
             or args.voices):
-        ap.error("give the text to say, or --fx TAKE, --presets, --voices, --settings, --default-voice or --unload")
+        ap.error("give the text to say, or --fx TAKE, --voices, --presets, --settings, --ro-take or --unload")
     if not wait_for_server(args.wait):
         print(f"No server at {SERVER}. Start it with start.cmd (or start.cmd --no-browser).")
         return 1
@@ -207,9 +235,12 @@ def main() -> int:
         return 0
     if args.voices:
         for k, v in call("/api/voices").items():
-            ro = f"take {v['romanian']['id']}" if v.get("romanian") else "made on first use"
+            takes = v.get("romanian_takes") or {}
+            use = (v.get("romanian") or {}).get("use", "clone")
+            ro = "; ".join(f"{kind}{' (auto)' if kind == use else ''}: "
+                           + (f"take {t['id']}" if t else "made on first use") for kind, t in takes.items())
             print(f"{k}  ({v['name']}, seed {v['seed']})\n  {v.get('about', '')}\n  {v['instruction']}\n"
-                  f"  Romanian clone: {ro}\n")
+                  f"  Romanian: {ro}\n")
         return 0
     if args.settings:
         st = call("/api/settings")
@@ -221,37 +252,25 @@ def main() -> int:
                      "the voice's (Romanian clones it)" if (k == "instruction" and not v) else v)
             print(f"  {k:12s} {shown}{mark}")
         return 0
-    if args.default_voice is not None:
-        voice = args.voice or "ancient-male"
-        if args.default_voice.lower() == "previous":
-            h = call("/api/default-voice/restore-previous", {"voice": voice})
-        elif args.default_voice:
-            h = call("/api/default-voice", {"id": args.default_voice, "voice": voice})
+    if args.ro_take is not None:
+        voice, kind = args.voice or "ancient-male", args.ro_voice or "auto"  # auto: what its Romanian lines use
+        if args.ro_take.lower() == "previous":
+            h = call("/api/default-voice/restore-previous", {"voice": voice, "kind": kind})
+        elif args.ro_take:
+            h = call("/api/default-voice", {"id": args.ro_take, "voice": voice, "kind": kind})
         else:
-            h = call(f"/api/default-voice?voice={voice}")
+            h = call(f"/api/default-voice?voice={voice}&kind={kind}")
+        what = "its native Romanian voice" if h.get("kind") == "native" else "a clone of its English take"
         if not h.get("id"):
-            print(f"no Romanian clone of {voice} yet: the first Romanian line with that voice makes one")
+            print(f"{voice} in Romanian, as {what}: none stored yet; the first Romanian line makes it")
         else:
-            print(f"Romanian lines with {voice} clone take {h['id']} ({h['f0_hz']} Hz median pitch)")
+            print(f"{voice} in Romanian, as {what}: take {h['id']} ({h['f0_hz']} Hz median pitch)")
             if h.get("previous"):
                 p = h["previous"]
-                print(f"previous: take {p['id']} ({p.get('f0_hz')} Hz); restore it with --default-voice previous")
+                print(f"previous: take {p['id']} ({p.get('f0_hz')} Hz); restore it with --ro-take previous")
         return 0
-    if args.fx:
-        res = call("/api/fx", given({"id": args.fx, "preset": args.preset, "check": args.check,
-                                     "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
-                                     "blend": args.blend, "double_ms": args.double, "bass_db": args.bass,
-                                     "trim_tail": args.trim_tail}))
-    else:
-        body = given({"text": args.text, "voice": args.voice, "instruction": args.instruction, "preset": args.preset,
-                      "cfg_scale": args.cfg, "like": args.like,
-                      "language": args.lang, "speed": args.speed,
-                      "pitch": args.pitch, "tempo": args.tempo, "reverb": args.reverb,
-                      "blend": args.blend, "double_ms": args.double, "bass_db": args.bass,
-                      "trim_tail": args.trim_tail, "check": args.check})
-        if args.seed is not None:  # omitted: the server's default seed
-            body["seed"] = None if args.seed.lower() == "random" else int(args.seed)
-        res = call("/api/speak", body)
+    path, body = request_for(args)
+    res = call(path, body)
 
     paths = deliver(res, args.out, args.name, args.format)
     if args.json:  # machine-readable: JSON only, with the delivered paths inside
@@ -271,9 +290,11 @@ def main() -> int:
                 print(f"voice: {res['voice']}")
             elif res.get("instruction"):
                 print(f"voice: {res['instruction']}")
+            elif res.get("default_voice"):
+                how = {"native": ", native Romanian", "clone": ", cloned from English"}.get(res.get("ro_voice"), "")
+                print(f"voice: {res.get('voice') or 'default voice'}{how} (take {res['like']})")
             elif res.get("like"):
-                who = f"{res.get('voice') or 'default voice'}, " if res.get("default_voice") else ""
-                print(f"voice: {who}cloned from take {res['like']}")
+                print(f"voice: cloned from take {res['like']}")
         keys = ("duration_s", "fx_s") if args.fx else ("duration_s", "gen_s", "fx_s")
         timing = [f"{k} {res[k]}s" for k in keys if k in res]
         print("  ".join(timing) + ("  (effects only, no regeneration)" if args.fx else ""))
