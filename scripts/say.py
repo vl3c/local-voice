@@ -3,7 +3,7 @@
 The server must be running (start.cmd). Everything stays on 127.0.0.1.
 
     python scripts/say.py "We are the dark."                          # the default: the Reaper (ancient-male, reaper-drone)
-    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4 --out D:/clips
+    python scripts/say.py "We are the dark." --voice ancient-female --blend 0.4 --out clips
     python scripts/say.py "Come closer." --voice vampire-female --preset dry --reverb none
     python scripts/say.py "Noi suntem întunericul." --lang ro --voice young-woman
     python scripts/say.py "..." --instruction "A tired old robot, slow and kind." --seed random

@@ -102,8 +102,15 @@ def dl(tmp_path, monkeypatch):
 
 
 def run(dl, monkeypatch, *argv):
-    monkeypatch.setattr(sys, "argv", ["download_models.py", "--root", str(dl.root), *argv])
+    accept = [] if "--verify" in argv or "--no-accept" in argv else ["--accept-licenses"]
+    argv = [a for a in argv if a != "--no-accept"]
+    monkeypatch.setattr(sys, "argv", ["download_models.py", "--root", str(dl.root), *accept, *argv])
     return dl.main()
+
+
+def test_nothing_is_fetched_until_the_licences_are_accepted(dl, monkeypatch, capsys):
+    assert run(dl, monkeypatch, "--no-accept") == 1 and dl.served == []
+    assert "--accept-licenses" in capsys.readouterr().out
 
 
 def test_downloads_and_verifies(dl, monkeypatch):

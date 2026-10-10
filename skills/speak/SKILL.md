@@ -36,12 +36,12 @@ skill's own folder with `..`: the skills are links, and `..` resolves to the wro
 2. **If not, start it.** It needs most of the 16 GB GPU, so first check nothing else holds it:
 
    ```bash
-   tasklist | grep -i -E "llama-server|python"
+   nvidia-smi --query-compute-apps=pid,process_name --format=csv,noheader
    nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader
    ```
 
-   If the local-agent server (`llama-server.exe`) or local-image's ComfyUI is running, **ask the
-   user** before stopping it (with that skill's own `stop.cmd`); they may be using it. Then start
+   If another program holds most of the GPU (a local LLM server, an image generator), **ask the
+   user** before stopping it; they may be using it. Then start
    the voice server. It opens in its own window (titled "local-voice server - close this window to
    stop it") and the command returns at once:
 
@@ -94,7 +94,7 @@ means `--tempo 0.85`. `--voices` and `--presets` list the rest.
 ## When you're done
 
 Leave the server running: it keeps the voice ready, so the next line takes seconds. It does hold
-the GPU (10-14 GB), which blocks the local-agent and local-image servers; after 15 idle minutes it
+the GPU (10-14 GB), which blocks other GPU-heavy programs; after 15 idle minutes it
 lets go by itself (standby) and reloads on the next line (~20 s; ~1 min if it was never warmed up). To free the GPU now without
 stopping it: `python ~/.claude/skills/local-voice/scripts/say.py --unload`. If the user is done
 with voice, offer to stop it:
